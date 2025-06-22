@@ -9,7 +9,11 @@ def scaled_dot_product_attention_simple(
     scale: float | None = None,
     mask: mx.array | None = None,
 ) -> mx.array:
-    pass
+    factor = mx.rsqrt(query.shape[-1]) if scale is None else scale
+    qk_mat = mx.matmul(query, key.swapaxes(-2, -1)) * factor
+    if mask is not None:
+        qk_mat += mask
+    return mx.matmul(softmax(qk_mat, -1), value)
 
 
 class SimpleMultiHeadAttention:
@@ -22,7 +26,19 @@ class SimpleMultiHeadAttention:
         wv: mx.array,
         wo: mx.array,
     ):
-        pass
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        assert self.hidden_size % self.num_heads == 0
+        self.head_dim = hidden_size // num_heads
+        assert wq.shape == (hidden_size, num_heads * self.head_dim)
+        assert wk.shape == (hidden_size, num_heads * self.head_dim)
+        assert wv.shape == (hidden_size, num_heads * self.head_dim)
+        assert wo.shape == (num_heads * self.head_dim, hidden_size)
+        self.wq = wq
+        self.wk = wk
+        self.wv = wv
+        self.wo = wo
+        self.scale = mx.rsqrt(mx.array(self.head_dim, dtype=mx.float32))
 
     def __call__(
         self,
@@ -31,7 +47,29 @@ class SimpleMultiHeadAttention:
         value: mx.array,
         mask: mx.array | None = None,
     ) -> mx.array:
-        pass
+        N, L, _ = query.shape
+        # Reshape query, key, value to N * L * H * D and swap axes to N * H * L * D
+        q_proj = (
+            linear(query, self.wq)
+            .reshape(N, L, self.num_heads, self.head_dim)
+            .swapaxes(1, 2)
+        )
+        k_proj = (
+            linear(key, self.wk)
+            .reshape(N, L, self.num_heads, self.head_dim)
+            .swapaxes(1, 2)
+        )
+        v_proj = (
+            linear(value, self.wv)
+            .reshape(N, L, self.num_heads, self.head_dim)
+            .swapaxes(1, 2)
+        )
+        # attn is N * H * L * D and reshape/swapaxes to N * L * H * D
+        attn = scaled_dot_product_attention_simple(
+            q_proj, k_proj, v_proj, float(self.scale), mask
+        ).swapaxes(1, 2).reshape(N, L, self.num_heads * self.head_dim)
+
+        return linear(attn, self.wo)
 
 
 def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
