@@ -24,7 +24,26 @@ class Qwen2MultiHeadAttention:
         max_seq_len: int = 32768,
         theta: int = 1000000,
     ):
-        pass
+        assert (
+            hidden_size % num_heads == 0
+        ), f"hidden_size {hidden_size} must be divisible by num_heads {num_heads}"
+        assert (
+            num_heads % num_kv_heads == 0
+        ), f"num_heads {num_heads} must be divisible by num_kv_heads {num_kv_heads}"
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.scale = mx.rsqrt(mx.array(hidden_size // num_heads, dtype=mx.float32))
+        self.wq = wq
+        self.wk = wk
+        self.wv = wv
+        self.wo = wo
+        self.bq = bq
+        self.bk = bk
+        self.bv = bv
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+        self.rope = RoPE(hidden_size, max_seq_len, base=self.theta, traditional=False)
 
     def __call__(
         self,
@@ -32,7 +51,20 @@ class Qwen2MultiHeadAttention:
         offset: int,
         mask: mx.array | str | None = None,
     ) -> mx.array:
-        pass
+        B, L, E = x.shape
+        # Linear -> B, L, Hq, D
+        q = linear(x, self.wq, self.bq)
+        # Linear -> B, L, H, D
+        k = linear(x, self.wk, self.bk)
+        v = linear(x, self.wv, self.bv)
+        # RoPE
+        q = self.rope(q, slice(offset, offset + L))
+        k = self.rope(k, slice(offset, offset + L))
+        # Attention
+        x = scaled_dot_product_attention_grouped(q, k, v, float(self.scale), mask)
+        # Linear -> B, L, E
+        x = linear(x, self.wo)
+        return x
 
 
 class Qwen2MLP:

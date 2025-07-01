@@ -65,15 +65,20 @@ class SimpleMultiHeadAttention:
             .swapaxes(1, 2)
         )
         # attn is N * H * L * D and reshape/swapaxes to N * L * H * D
-        attn = scaled_dot_product_attention_simple(
-            q_proj, k_proj, v_proj, float(self.scale), mask
-        ).swapaxes(1, 2).reshape(N, L, self.num_heads * self.head_dim)
+        attn = (
+            scaled_dot_product_attention_simple(
+                q_proj, k_proj, v_proj, float(self.scale), mask
+            )
+            .swapaxes(1, 2)
+            .reshape(N, L, self.num_heads * self.head_dim)
+        )
 
         return linear(attn, self.wo)
 
 
 def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
-    pass
+    mask = mx.tril(mx.ones((L, S)), k=S - L)
+    return mx.where(mask, 0.0, -mx.inf).astype(dtype)
 
 
 def scaled_dot_product_attention_grouped(
@@ -83,7 +88,28 @@ def scaled_dot_product_attention_grouped(
     scale: float | None = None,
     mask: mx.array | str | None = None,
 ) -> mx.array:
-    pass
+    factor = mx.rsqrt(query.shape[-1]) if scale is None else scale
+    expected_shape = query.shape
+
+    H_q, L, D = query.shape[-3:]
+    H, S, _ = key.shape[-3:]
+    assert H_q % H == 0
+
+    # Reshape to group heads
+    query = query.reshape(-1, H, H_q // H, L, D)
+    key = key.reshape(-1, H, 1, S, D)
+    value = value.reshape(-1, H, 1, S, D)
+
+    # Apply attention
+    qk_mat = mx.matmul(query, key.swapaxes(-2, -1)) * factor
+    if isinstance(mask, str):
+        if mask == "causal":
+            qk_mat += causal_mask(L, S, query.dtype)
+        else:
+            raise ValueError(f"Invalid mask: {mask}")
+    elif mask is not None:
+        qk_mat += mask.reshape(-1, H, H_q // H, L, S)
+    return mx.matmul(softmax(qk_mat, -1), value).reshape(expected_shape)
 
 
 def flash_attention(
