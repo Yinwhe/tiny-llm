@@ -11,7 +11,30 @@ def simple_generate(
     prompt: str,
     sampler: Callable[[mx.array], mx.array] | None,
 ) -> str:
-    pass
+    def _step(model: Qwen2ModelWeek1, y: mx.array, offset: int) -> mx.array:
+        logits = model(y[None], offset)
+        logits = logits[:, -1, :]
+        if sampler is None:
+            y = mx.argmax(logits, axis=-1)
+        else:
+            y = sampler(logits)
+        return y
+
+    # prefill with the prompt
+    tokens = mx.array(tokenizer.encode(prompt, add_special_tokens=False))
+    detokenizer = tokenizer.detokenizer
+    detokenizer.reset()
+
+    # generate/decode
+    while True:
+        token = _step(model, tokens, tokens.size)
+        mx.eval(token)
+        tokens = mx.concat([tokens, token])
+        if token.item() == tokenizer.eos_token_id:
+            break
+        detokenizer.add_token(token.item())
+        print(detokenizer.last_segment, end="", flush=False)
+    
 
 
 def simple_generate_with_kv_cache(
