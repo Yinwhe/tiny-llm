@@ -1,0 +1,22 @@
+{
+  "include": [
+    "src",
+    "tests",
+    "tests_refsol",
+    "tests_torch_ref",
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "src/extensions/build",
+    "src/extensions_ref/build"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "src"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}
