@@ -34,7 +34,6 @@ src/tiny_llm/attention.py
 
 * [Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
 * [PyTorch Scaled Dot Product Attention API](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) (assume `enable_gqa=False`, assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
-* [MLX Scaled Dot Product Attention API](https://ml-explore.github.io/mlx/build/html/python/_autosummary/mlx.core.fast.scaled_dot_product_attention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
 * [Attention is All You Need](https://arxiv.org/abs/1706.03762)
 
 Implement `scaled_dot_product_attention` following the below attention function. The function takes key, value, and query of the same dimensions, and an optional mask matrix `M`.
@@ -56,7 +55,7 @@ output: N.. x L x D
 scale = 1/sqrt(D) if not specified
 ```
 
-You may use `softmax` provided by mlx and implement it later in week 2.
+You may use `torch.softmax` or `torch.nn.functional.softmax` and implement it later in week 2.
 
 Because we are always using the attention layer within the multi-head attention layer, the actual tensor shape when serving
 the model will be:
@@ -74,7 +73,7 @@ mask: 1 x H x L x L
 At the end of this task, you should be able to pass the following tests:
 
 ```
-pdm run test --week 1 --day 1 -- -k task_1
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py -k task_1
 ```
 
 ## Task 2: Implement `SimpleMultiHeadAttention`
@@ -89,7 +88,6 @@ src/tiny_llm/attention.py
 
 * [Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/)
 * [PyTorch MultiHeadAttention API](https://docs.pytorch.org/docs/2.8/generated/torch.nn.MultiheadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
-* [MLX MultiHeadAttention API](https://ml-explore.github.io/mlx/build/html/python/nn/_autosummary/mlx.nn.MultiHeadAttention.html) (assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
 * [The Illustrated GPT-2 (Visualizing Transformer Language Models)](https://jalammar.github.io/illustrated-gpt2) helps you better understand what key, value, and query are.
 
 Implement `SimpleMultiHeadAttention`. The layer takes a batch of vectors, maps it through the K, V, Q weight matrixes, and use the attention function we implemented in task 1 to compute the result. The output needs to be mapped using the O
@@ -126,13 +124,13 @@ w_o: E x (H x D)
 At the end of the task, you should be able to pass the following tests:
 
 ```
-pdm run test --week 1 --day 1 -- -k task_2
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py -k task_2
 ```
 
 You can run all tests for the day with:
 
 ```
-pdm run test --week 1 --day 1
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py
 ```
 
 {{#include copyright.md}}

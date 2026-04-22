@@ -53,12 +53,12 @@ You can do this by reshaping `x` to (N, L, H, D // 2, 2) and then applying the a
 **📚 Readings**
 
 - [PyTorch RotaryPositionalEmbeddings API](https://pytorch.org/torchtune/stable/generated/torchtune.modules.RotaryPositionalEmbeddings.html)
-- [MLX Implementation of RoPE before the custom metal kernel implementation](https://github.com/ml-explore/mlx/pull/676/files)
+- [vLLM implementation of RoPE](https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/rotary_embedding)
 
 You can test your implementation by running the following command:
 
 ```
-pdm run test --week 1 --day 2 -- -k task_1
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py -k task_1
 ```
 
 ## Task 2: Implement `RoPE` in the non-traditional form
@@ -84,13 +84,13 @@ frequencies to each half separately.
 You can test your implementation by running the following command:
 
 ```
-pdm run test --week 1 --day 2 -- -k task_2
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py -k task_2
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```
-pdm run test --week 1 --day 2
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py
 ```
 
 {{#include copyright.md}}

@@ -3,8 +3,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .tiny_llm_base import *
-from .utils import *
+from .tiny_llm_base import (
+    SimpleMultiHeadAttention,
+    linear,
+    scaled_dot_product_attention_simple,
+    softmax,
+)
+from .utils import (
+    AVAILABLE_DEVICES,
+    AVAILABLE_DEVICES_IDS,
+    PRECISION_IDS,
+    PRECISIONS,
+    assert_allclose,
+    make_device,
+    rand_uniform,
+)
 
 
 @pytest.mark.parametrize("device_type", AVAILABLE_DEVICES, ids=AVAILABLE_DEVICES_IDS)
