@@ -1,0 +1,45 @@
+# Build and test the reference solution automatically on M1 runners.
+# This helps prevent breakage of the dev setup.
+name: macOS
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test-refsol:
+    name: Test reference solution
+    runs-on: macos-15 # ARM64
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install HuggingFace weights
+        run: |
+          brew install huggingface-cli
+          hf download Qwen/Qwen2-0.5B-Instruct-MLX
+
+      - uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: 3.12
+          cache: true
+
+      - run: pdm install
+
+      - run: pdm run check-installation
+
+      # Without this, future build steps fail in CMake.
+      - name: Add nanobind to CMake
+        run: |
+          nanobind_dir=$(pdm run python -c 'import nanobind, os; print(os.path.join(nanobind.__path__[0], "cmake"))')
+          echo "nanobind_DIR=${nanobind_dir}" >> $GITHUB_ENV
+
+      - name: Try building extensions
+        run: |
+          pdm run build-ext
+          pdm run build-ext-test
+
+      - run: pdm run build-ext-ref
+
+      - run: pdm run test-refsol

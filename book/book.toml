@@ -1,0 +1,15 @@
+[book]
+authors = ["Alex Chi", "Connor Zhang"]
+language = "en"
+src = "src"
+title = "Tiny LLM - LLM Serving in a Week"
+
+[preprocessor.toc]
+command = "mdbook-toc"
+renderer = ["html"]
+
+[output.html]
+git-repository-url = "https://github.com/skyzh/tiny-llm"
+
+[preprocessor.katex]
+after = ["links"]
