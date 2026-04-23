@@ -23,6 +23,60 @@ def scaled_dot_product_attention_simple(
     return torch.matmul(softmax(scores, axis=-1), value)
 
 
+def causal_mask(
+    L: int, S: int, dtype: torch.dtype, device: torch.device
+) -> torch.Tensor:
+    mask = torch.tril(
+        torch.ones((L, S), device=device, dtype=torch.bool),
+        diagonal=S - L,
+    )
+    return torch.where(mask, 0.0, -torch.inf).to(dtype=dtype)
+
+
+def scaled_dot_product_attention_grouped(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    scale: float | None = None,
+    mask: torch.Tensor | str | None = None,
+) -> torch.Tensor:
+    """
+    Potential input of the mask:
+    - torch.Tensor that can broadcast to B * H_q * L * S, which needs to be reshaped to match multi-head dimensions
+    - None which will be ignored
+    """
+    expected_shape = query.shape
+    *batch_shape, H_q, L, D = query.shape
+    H, S, _ = key.shape[-3:]
+
+    assert H_q % H == 0, "H_q must be divisible by H"
+    repeats = H_q // H
+
+    factor = 1.0 / math.sqrt(D) if scale is None else scale
+    factor = query.new_tensor(factor)
+
+    query = query.reshape(*batch_shape, H, repeats, L, D)
+    key = key.reshape(*batch_shape, H, 1, S, D)
+    value = value.reshape(*batch_shape, H, 1, S, D)
+
+    scores = (
+        torch.matmul(
+            query,
+            key.transpose(-2, -1),
+        )
+        * factor
+    )
+    if mask == "causal":
+        mask = causal_mask(L, S, scores.dtype, scores.device)
+        scores = scores + mask
+    elif isinstance(mask, torch.Tensor):
+        scores = scores + mask.reshape(*batch_shape, H, repeats, L, S)
+    elif mask is not None:
+        raise NotImplementedError
+
+    return torch.matmul(softmax(scores, axis=-1), value).reshape(expected_shape)
+
+
 class SimpleMultiHeadAttention:
     def __init__(
         self,
