@@ -1,6 +1,9 @@
 from tiny_llm_torch_ref import (
+    Embedding,
     Qwen2MLP,
+    Qwen2ModelWeek1,
     Qwen2MultiHeadAttention,
+    Qwen2TransformerBlock,
     RMSNorm,
     RoPE,
     SimpleMultiHeadAttention,
@@ -13,8 +16,11 @@ from tiny_llm_torch_ref import (
 )
 
 __all__ = [
+    "Embedding",
     "Qwen2MLP",
+    "Qwen2ModelWeek1",
     "Qwen2MultiHeadAttention",
+    "Qwen2TransformerBlock",
     "RMSNorm",
     "RoPE",
     "SimpleMultiHeadAttention",
