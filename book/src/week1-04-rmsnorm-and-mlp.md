@@ -14,7 +14,7 @@ src/tiny_llm/layer_norm.py
 **📚 Readings**
 
 * [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
-* [Qwen2 layers implementation in mlx-lm (includes RMSNorm)]([https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py](https://github.com/ml-explore/mlx-lm/blob/bcb96db87f218453774f8808159012f15fc0dc7b/mlx_lm/models/qwen2.py)) - See `RMSNorm`.
+* [Qwen2 layers implementation in Hugging Face Transformers (includes RMSNorm)](https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py) - See `Qwen2RMSNorm`.
 
 
 RMSNorm is defined as:
@@ -43,7 +43,7 @@ output: N.. x D
 You can test your implementation by running:
 
 ```bash
-pdm run test --week 1 --day 4 -- -k task_1
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py -k task_1
 ```
 
 ## Task 2: Implement the MLP Block
@@ -64,7 +64,7 @@ Modern Transformer architectures, including Qwen2, often employ more advanced FF
 * [SilU(Swish) activation function](https://arxiv.org/pdf/1710.05941)
 * [SwiGLU Paper(GLU Variants Improve Transformer)](https://arxiv.org/abs/2002.05202v1)
 * [PyTorch SiLU documentation](https://pytorch.org/docs/stable/generated/torch.nn.SiLU.html)
-* [Qwen2 layers implementation in mlx-lm (includes MLP)](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen2.py)
+* [Qwen2 layers implementation in Hugging Face Transformers (includes MLP)](https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py)
 
 Essentially, SwiGLU is a combination of GLU and the SiLU (Sigmoid Linear Unit) activation function:
 -  GLU is a gating mechanism that allows the model to learn which parts of the input to focus on. It typically involves an element-wise product of two linear projections of the input, one of which might be passed through an activation function. Compared to ReLU used in the original FFN, GLU can help the model learn more complex relationships in the data, deciding which features to keep and which to discard.
@@ -106,13 +106,13 @@ output: N.. x L x E
 You can test your implementation by running:
 
 ```bash
-pdm run test --week 1 --day 4 -- -k task_2
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py -k task_2
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```bash
-pdm run test --week 1 --day 4
+.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py
 ```
 
 

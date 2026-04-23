@@ -1,5 +1,7 @@
 from tiny_llm_torch_ref import (
+    Qwen2MLP,
     Qwen2MultiHeadAttention,
+    RMSNorm,
     RoPE,
     SimpleMultiHeadAttention,
     causal_mask,
@@ -11,7 +13,9 @@ from tiny_llm_torch_ref import (
 )
 
 __all__ = [
+    "Qwen2MLP",
     "Qwen2MultiHeadAttention",
+    "RMSNorm",
     "RoPE",
     "SimpleMultiHeadAttention",
     "causal_mask",
