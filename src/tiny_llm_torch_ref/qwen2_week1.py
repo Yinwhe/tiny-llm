@@ -3,7 +3,7 @@ import math
 import torch
 
 from .attention import scaled_dot_product_attention_grouped
-from .basics import linear
+from .basics import linear, silu
 from .positional_encoding import RoPE
 
 
@@ -80,3 +80,22 @@ class Qwen2MultiHeadAttention:
         output = output.transpose(1, 2).reshape(batch_size, seq_len, hidden_size)
 
         return linear(output, self.wo)
+
+
+class Qwen2MLP:
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+        w_gate: torch.Tensor,
+        w_up: torch.Tensor,
+        w_down: torch.Tensor,
+    ):
+        self.dim = dim
+        self.hidden_dim = hidden_dim
+        self.w_gate = w_gate
+        self.w_up = w_up
+        self.w_down = w_down
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        return linear(silu(linear(x, self.w_gate)) * linear(x, self.w_up), self.w_down)

@@ -18,4 +18,4 @@ def linear(
 
 
 def silu(x: torch.Tensor) -> torch.Tensor:
-    return torch.nn.functional.silu(x)
+    return x * torch.sigmoid(x)
