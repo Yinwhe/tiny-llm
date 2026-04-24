@@ -1,12 +1,12 @@
 import argparse
-import shutil
 import os
+import shutil
 import pytest
 from pathlib import Path
 
 
 def copy_test(args, skip_if_exists=False, force=False):
-    source_file = f"tests_refsol/test_week_{args.week}_day_{args.day}.py"
+    source_file = f"tests_torch_ref/test_week_{args.week}_day_{args.day}.py"
     target_file = f"tests/test_week_{args.week}_day_{args.day}.py"
     if skip_if_exists and os.path.exists(target_file) and not force:
         # diff the two files and warn if they are different
@@ -24,7 +24,7 @@ def copy_test(args, skip_if_exists=False, force=False):
 
 def test(args):
     if args.week and args.day:
-        copy_test(args, skip_if_exists=True)
+        copy_test(args)
         pytest.main(
             ["-v", f"tests/test_week_{args.week}_day_{args.day}.py"] + args.remainders
         )
@@ -38,14 +38,14 @@ def test(args):
 def test_refsol(args):
     if args.week and args.day:
         pytest.main(
-            ["-v", f"tests_refsol/test_week_{args.week}_day_{args.day}.py"]
+            ["-v", f"tests_torch_ref/test_week_{args.week}_day_{args.day}.py"]
             + args.remainders
         )
     elif args.week or args.day:
         print("Please provide both week and day")
         exit(1)
     else:
-        pytest.main(["-v", "tests_refsol"] + args.remainders)
+        pytest.main(["-v", "tests_torch_ref"] + args.remainders)
 
 
 def main():

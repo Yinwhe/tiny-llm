@@ -1,20 +1,19 @@
-import mlx.core as mx
 import torch
 
-with mx.stream(mx.cpu):
-    a = mx.array([1, 2, 3])
-    b = mx.array([4, 5, 6])
-    c = mx.add(a, b)
-    print(c)
+with torch.no_grad():
+    cpu_left = torch.tensor([1, 2, 3], device="cpu")
+    cpu_right = torch.tensor([4, 5, 6], device="cpu")
+    print(torch.add(cpu_left, cpu_right))
 
-with mx.stream(mx.gpu):
-    a = mx.array([1, 2, 3])
-    b = mx.array([4, 5, 6])
-    c = mx.add(a, b)
-    print(c)
+if not torch.cuda.is_available():
+    raise RuntimeError("PyTorch cannot find a CUDA GPU")
 
-print(
-    torch.add(
-        torch.tensor([1, 2, 3], device="cpu"), torch.tensor([4, 5, 6], device="cpu")
-    )
-)
+with torch.no_grad():
+    device = torch.device("cuda")
+    cuda_left = torch.tensor([1, 2, 3], device=device)
+    cuda_right = torch.tensor([4, 5, 6], device=device)
+    print(torch.add(cuda_left, cuda_right))
+
+print(f"torch: {torch.__version__}")
+print(f"torch cuda: {torch.version.cuda}")
+print(f"cuda device: {torch.cuda.get_device_name(0)}")

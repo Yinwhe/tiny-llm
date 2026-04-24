@@ -15,7 +15,7 @@ Otherwise, some of the tests will be skipped.
 ## Task 1: Implement `Qwen2TransformerBlock`
 
 ```
-src/tiny_llm_torch_ref/qwen2_week1.py
+src/tiny_llm/qwen2_week1.py
 ```
 
 **📚 Readings**
@@ -51,13 +51,13 @@ huggingface-cli download Qwen/Qwen2-0.5B-Instruct
 huggingface-cli download Qwen/Qwen2-1.5B-Instruct
 huggingface-cli download Qwen/Qwen2-7B-Instruct
 # Run the tests
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_5.py -k task_1
+pdm run test --week 1 --day 5 -- -k task_1
 ```
 
 ## Task 2: Implement `Embedding`
 
 ```
-src/tiny_llm_torch_ref/embedding.py
+src/tiny_llm/embedding.py
 ```
 
 **📚 Readings**
@@ -93,7 +93,7 @@ huggingface-cli download Qwen/Qwen2-0.5B-Instruct
 huggingface-cli download Qwen/Qwen2-1.5B-Instruct
 huggingface-cli download Qwen/Qwen2-7B-Instruct
 # Run the tests
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_5.py -k task_2
+pdm run test --week 1 --day 5 -- -k task_2
 ```
 
 ## Task 3: Implement `Qwen2ModelWeek1`
@@ -101,7 +101,7 @@ huggingface-cli download Qwen/Qwen2-7B-Instruct
 Now that we have built all the components of the Qwen2 model, we can implement the Qwen2ModelWeek1 class.
 
 ```
-src/tiny_llm_torch_ref/qwen2_week1.py
+src/tiny_llm/qwen2_week1.py
 ```
 
 **📚 Readings**
@@ -159,13 +159,13 @@ huggingface-cli download Qwen/Qwen2-0.5B-Instruct
 huggingface-cli download Qwen/Qwen2-1.5B-Instruct
 huggingface-cli download Qwen/Qwen2-7B-Instruct
 # Run the tests
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_5.py -k task_3
+pdm run test --week 1 --day 5 -- -k task_3
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_5.py
+pdm run test --week 1 --day 5
 ```
 
 {{#include copyright.md}}

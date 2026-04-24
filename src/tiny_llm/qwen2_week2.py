@@ -1,12 +1,9 @@
-import mlx.core as mx
-from .basics import linear, silu
-from .attention import scaled_dot_product_attention_grouped
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
 from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights
+
+import torch
+
 from .kv_cache import TinyKvCache
+from .quantize import QuantizedWeights
 
 
 class Qwen2MultiHeadAttention:
@@ -19,9 +16,9 @@ class Qwen2MultiHeadAttention:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -30,11 +27,11 @@ class Qwen2MultiHeadAttention:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offsets: list[int],
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -49,7 +46,7 @@ class Qwen2MLP:
     ):
         pass
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         pass
 
 
@@ -65,14 +62,14 @@ class Qwen2TransformerBlock:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
         w_gate: QuantizedWeights,
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -81,27 +78,27 @@ class Qwen2TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offset: int,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
 class Qwen2ModelWeek2:
     def __init__(
         self,
-        mlx_model: Any,
+        torch_model: Any,
         enable_flash_attn: bool = False,
     ):
-        self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.num_hidden_layers = torch_model.config.num_hidden_layers
         pass
 
     def __call__(
         self,
-        inputs: mx.array,
+        inputs: torch.Tensor,
         offset: int,
         cache: list[TinyKvCache],
-    ) -> mx.array:
+    ) -> torch.Tensor:
         pass

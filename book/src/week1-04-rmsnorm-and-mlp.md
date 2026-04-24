@@ -43,7 +43,7 @@ output: N.. x D
 You can test your implementation by running:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py -k task_1
+pdm run test --week 1 --day 4 -- -k task_1
 ```
 
 ## Task 2: Implement the MLP Block
@@ -106,13 +106,13 @@ output: N.. x L x E
 You can test your implementation by running:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py -k task_2
+pdm run test --week 1 --day 4 -- -k task_2
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_4.py
+pdm run test --week 1 --day 4
 ```
 
 

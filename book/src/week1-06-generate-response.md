@@ -29,7 +29,7 @@ logits = output_logits[:, -1, :]
 
 Then, you can optionally apply the log-sum-exp trick to normalize the logits to avoid numerical instability. As we only
 do argmax sampling, the log-sum-exp trick is not necessary. Then, you need to sample the next token from the logits.
-You can use the `mx.argmax` function to sample the token with the highest probability over the last dimension
+You can use the `torch.argmax` function to sample the token with the highest probability over the last dimension
 (the vocab_size axis). The function returns the next token number. This decoding strategy is called greedy decoding as we always
 pick the token with the highest probability.
 
@@ -60,19 +60,19 @@ You can test your implementation by running the following command:
 
 ```bash
 # Download the models if you haven't done so
-hf download Qwen/Qwen2-0.5B-Instruct-MLX
-hf download Qwen/Qwen2-1.5B-Instruct-MLX
-hf download Qwen/Qwen2-7B-Instruct-MLX
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct
+huggingface-cli download Qwen/Qwen2-7B-Instruct
 # Run the tests
 pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b \
-  --prompt "Give me a short introduction to large language model"
+  --device gpu --prompt "Give me a short introduction to large language model"
 pdm run main --solution tiny_llm --loader week1 --model qwen2-1.5b \
-  --prompt "Give me a short introduction to large language model"
+  --device gpu --prompt "Give me a short introduction to large language model"
 pdm run main --solution tiny_llm --loader week1 --model qwen2-7b \
-  --prompt "Give me a short introduction to large language model"
+  --device gpu --prompt "Give me a short introduction to large language model"
 ```
 
-It should gives you a reasonable response of "what is a large language model". Replace `--solution tiny_llm` with
-`--solution ref` to use the reference solution.
+It should gives you a reasonable response of "what is a large language model". You can also use
+`--solution ref` to compare against the reference implementation.
 
 {{#include copyright.md}}

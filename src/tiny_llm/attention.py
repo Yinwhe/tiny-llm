@@ -1,14 +1,15 @@
-import mlx.core as mx
-from .basics import softmax, linear
+import torch
+
+from .basics import linear, softmax
 
 
 def scaled_dot_product_attention_simple(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | None = None,
-) -> mx.array:
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     pass
 
 
@@ -17,42 +18,47 @@ class SimpleMultiHeadAttention:
         self,
         hidden_size: int,
         num_heads: int,
-        wq: mx.array,
-        wk: mx.array,
-        wv: mx.array,
-        wo: mx.array,
+        wq: torch.Tensor,
+        wk: torch.Tensor,
+        wv: torch.Tensor,
+        wo: torch.Tensor,
     ):
         pass
 
     def __call__(
         self,
-        query: mx.array,
-        key: mx.array,
-        value: mx.array,
-        mask: mx.array | None = None,
-    ) -> mx.array:
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         pass
 
 
-def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
+def causal_mask(
+    L: int,
+    S: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
     pass
 
 
 def scaled_dot_product_attention_grouped(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | str | None = None,
-) -> mx.array:
+    mask: torch.Tensor | str | None = None,
+) -> torch.Tensor:
     pass
 
 
 def flash_attention(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | None = None,
-) -> mx.array:
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     pass
