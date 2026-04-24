@@ -37,6 +37,11 @@ class RoPE:
     def __call__(
         self, x: torch.Tensor, offset: list[slice] | slice | None = None
     ) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L, H, D]
+        - returns: [B, L, H, D]
+        """
         N, L, H, D = x.shape
         assert D == self.dims, f"input last dim must be {self.dims}, got {D}"
         assert x.device == self.device, f"input must be on {self.device}, got {x.device}"

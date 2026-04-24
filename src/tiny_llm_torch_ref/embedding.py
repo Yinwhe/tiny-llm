@@ -10,7 +10,17 @@ class Embedding:
         self.weight = weight
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L] or [L]
+        - returns: [B, L, E] or [L, E]
+        """
         return self.weight[x, :]
 
     def as_linear(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L, E]
+        - returns: [B, L, V]
+        """
         return linear(x, self.weight)

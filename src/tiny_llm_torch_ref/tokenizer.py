@@ -12,6 +12,10 @@ class StreamingDetokenizer:
         self._text = ""
 
     def add_token(self, token: int):
+        """
+        Input:
+        - `token`: scalar token id
+        """
         self.tokens.append(token)
         self._text = self._tokenizer.decode(
             self.tokens,
@@ -28,6 +32,10 @@ class StreamingDetokenizer:
 
     @property
     def last_segment(self):
+        """
+        Returns:
+        - incremental decoded text segment
+        """
         segment = self._text[self.offset :]
         self.offset = len(self._text)
         return segment

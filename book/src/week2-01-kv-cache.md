@@ -103,14 +103,14 @@ L  = total tokens length
 
 update_and_fetch(key, value) -> key, value
 
-key:   B, L', H, D
-value: B, L', H, D
+key:   B, H, L', D
+value: B, H, L', D
 
 self.key   = concat_or_initialize(self.key, key, on the L' dimension)
 self.value = concat_or_initialize(self.value, value, on the L' dimension)
 
-self.key:   B, L, H, D
-self.value: B, L, H, D
+self.key:   B, H, L, D
+self.value: B, H, L, D
 
 return self.key, self.value
 ```
@@ -137,10 +137,10 @@ k = linear(x, wk, bk) -> B, L', H, D
 v = linear(x, wv, bv) -> B, L', H, D
 q = rope(q, offset=slice(offset, offset + L'))
 k = rope(k, offset=slice(offset, offset + L'))
-(transpose as needed)
-k, v = cache.update_and_fetch(k, v) ; k/v: B, L, H, D, q: B, L', H, D
-x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, L', H_q, D  # at float32 precision
-(transpose as needed)
+(transpose to B, H, L', D as needed)
+k, v = cache.update_and_fetch(k, v) ; k/v: B, H, L, D, q: B, H_q, L', D
+x = scaled_dot_product_attention_grouped(q, k, v, scale, mask) -> B, H_q, L', D  # at float32 precision
+(transpose back as needed)
 x = linear(x, wo) -> B, L', E
 ```
 
@@ -149,7 +149,7 @@ and the context of week 1 day 3: in the GQA implementation, k/v's sequence lengt
 q's sequence length is `L`. In the Qwen2 multihead attention implementation, `L'` is the "new token" and `L` is
 the total sequence length, which corresponds to `L` and `S` in week 1 respectively.
 
-Note that another refactor of this week's code is that all modules now take `QuantizedWeights` instead of `mx.array`
+Note that another refactor of this week's code is that all modules now take `QuantizedWeights` instead of dense `torch.Tensor`
 for some weights. You will need to move the dequantize code from loading the model to each module first, and we
 will replace it with our own quantized matmul implementation for the rest of the week.
 
@@ -165,6 +165,12 @@ To verify correctness, run the following test (almost identical to week 1’s te
 
 ```bash
 pdm run test --week 2 --day 1
+```
+
+If you want to compare against the CUDA reference implementation in this repo, you can also run:
+
+```bash
+pdm run test-refsol --week 2 --day 1
 ```
 
 ## Task 4: Implement Decoding
@@ -192,11 +198,19 @@ pdm run main --solution tiny_llm --loader week2 --model qwen2-0.5b
 pdm run main --solution tiny_llm --loader week2 --model qwen2-7b
 ```
 
-You can also benchmark throughput and compare your implementation with the reference solution:
+To compare against the reference implementation:
 
 ```bash
-pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
+pdm run main --solution ref --loader week2 --model qwen2-0.5b
+pdm run main --solution ref --loader week2 --model qwen2-7b
+```
+
+The dedicated benchmark script has not been migrated to the Torch/CUDA workflow yet. For a quick manual comparison,
+you can measure end-to-end generation time with shell timing:
+
+```bash
+time pdm run main --solution ref --loader week1 --model qwen2-0.5b
+time pdm run main --solution ref --loader week2 --model qwen2-0.5b
 ```
 
 {{#include copyright.md}}

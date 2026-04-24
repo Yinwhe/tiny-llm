@@ -6,6 +6,7 @@ import torch
 from .attention import scaled_dot_product_attention_grouped
 from .basics import linear, silu
 from .embedding import Embedding
+from .kv_cache import TinyKvCache
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
 
@@ -25,6 +26,7 @@ class Qwen2MultiHeadAttention:
         bv: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_flash_attention: bool = False,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -45,6 +47,7 @@ class Qwen2MultiHeadAttention:
         self.bq = bq
         self.bk = bk
         self.bv = bv
+        self.use_flash_attention = use_flash_attention
         self.rope = RoPE(
             self.head_dim,
             max_seq_len,
@@ -56,15 +59,22 @@ class Qwen2MultiHeadAttention:
     def __call__(
         self,
         x: torch.Tensor,
+        offset: int,
+        cache: TinyKvCache,
         mask: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """
         Shapes:
-        - `x`: [B, L, E]
-        - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L, L]
-        - returns: [B, L, E]
+        - `x`: [B, L_new, E]
+        - `offset`: scalar start position of this chunk
+        - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L_new, L_total]
+        - returns: [B, L_new, E]
         """
-        batch_size, seq_len, hidden_size = x.shape
+        batch_size, seq_len, _ = x.shape
+        if hasattr(cache, "offset"):
+            assert cache.offset == offset, (
+                f"cache offset {cache.offset} must match input offset {offset}"
+            )
 
         projection_q = linear(x, self.wq, self.bq).reshape(
             batch_size, seq_len, self.num_heads, self.head_dim
@@ -76,17 +86,27 @@ class Qwen2MultiHeadAttention:
             batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
 
-        projection_q = self.rope(projection_q, offset=slice(0, seq_len))
-        projection_k = self.rope(projection_k, offset=slice(0, seq_len))
+        projection_q = self.rope(projection_q, offset=slice(offset, offset + seq_len))
+        projection_k = self.rope(projection_k, offset=slice(offset, offset + seq_len))
+        projection_q = projection_q.transpose(1, 2)
+        projection_k = projection_k.transpose(1, 2)
+        projection_v = projection_v.transpose(1, 2)
+
+        projection_k, projection_v, _, mask = cache.update_and_fetch(
+            projection_k,
+            projection_v,
+            mask_length=seq_len,
+            mask=mask,
+        )
 
         output = scaled_dot_product_attention_grouped(
-            projection_q.transpose(1, 2).to(dtype=torch.float32),
-            projection_k.transpose(1, 2).to(dtype=torch.float32),
-            projection_v.transpose(1, 2).to(dtype=torch.float32),
+            projection_q.to(dtype=torch.float32),
+            projection_k.to(dtype=torch.float32),
+            projection_v.to(dtype=torch.float32),
             scale=self.scale,
             mask=mask,
         ).to(dtype=x.dtype)
-        output = output.transpose(1, 2).reshape(batch_size, seq_len, hidden_size)
+        output = output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
 
         return linear(output, self.wo)
 
@@ -137,9 +157,11 @@ class Qwen2TransformerBlock:
         w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
+        use_flash_attention: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
+        self.use_flash_attention = use_flash_attention
         self.mlp = Qwen2MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
         self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
@@ -160,31 +182,35 @@ class Qwen2TransformerBlock:
             bv=bv,
             max_seq_len=max_seq_len,
             theta=theta,
+            use_flash_attention=use_flash_attention,
         )
 
     def __call__(
         self,
         x: torch.Tensor,
+        offset: int,
+        cache: TinyKvCache,
         mask: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """
         Shapes:
-        - `x`: [B, L, E]
-        - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H, L, L]
-        - returns: [B, L, E]
+        - `x`: [B, L_new, E]
+        - `offset`: scalar start position of this chunk
+        - returns: [B, L_new, E]
         """
-        residual = self.self_attn(self.input_layernorm(x), mask)
+        residual = self.self_attn(self.input_layernorm(x), offset, cache, mask)
         hidden = x + residual
         residual = self.mlp(self.post_attention_layernorm(hidden))
         return hidden + residual
 
 
-class Qwen2ModelWeek1:
+class Qwen2ModelWeek2:
     def __init__(
         self,
         transformers_model: Any,
         precision: torch.dtype = torch.float16,
         device: torch.device | str | None = None,
+        enable_flash_attn: bool = False,
     ):
         config = transformers_model.config
         model = transformers_model.model
@@ -243,6 +269,7 @@ class Qwen2ModelWeek1:
                 ),
                 max_seq_len=config.max_position_embeddings,
                 theta=config.rope_theta,
+                use_flash_attention=enable_flash_attn,
             )
             self.layers_inner.append(layer)
 
@@ -256,16 +283,22 @@ class Qwen2ModelWeek1:
         else:
             self.w_lm_head = cast(transformers_model.lm_head.weight)
 
-    def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
+    def __call__(
+        self,
+        inputs: torch.Tensor,
+        offset: int,
+        cache: list[TinyKvCache],
+    ) -> torch.Tensor:
         """
         Shapes:
-        - `inputs`: [B, L]
-        - hidden states through the network: [B, L, E]
-        - returns logits: [B, L, V]
+        - `inputs`: [B, L_new]
+        - returns logits: [B, L_new, V]
         """
         hidden = self.embedding(inputs)
         for index in range(self.num_hidden_layers):
-            hidden = self.layers_inner[index](hidden, mask="causal")
+            hidden = self.layers_inner[index](
+                hidden, offset, cache[index], mask="causal"
+            )
         hidden = self.norm(hidden)
         if self.w_lm_head is not None:
             return linear(hidden, self.w_lm_head)
