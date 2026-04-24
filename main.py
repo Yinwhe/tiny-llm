@@ -30,17 +30,36 @@ parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
 if args.solution in {"tiny_llm", "user"}:
-    from tiny_llm import load_tokenizer, models, sampler, simple_generate
+    from tiny_llm import (
+        load_tokenizer,
+        models,
+        sampler,
+        simple_generate,
+        simple_generate_with_kv_cache,
+    )
 elif args.solution in {"tiny_llm_torch_ref", "torch_ref", "ref"}:
-    from tiny_llm_torch_ref import load_tokenizer, models, sampler, simple_generate
+    from tiny_llm_torch_ref import (
+        load_tokenizer,
+        models,
+        sampler,
+        simple_generate,
+        simple_generate_with_kv_cache,
+    )
 else:
     raise ValueError(f"Solution {args.solution} not supported")
-if args.loader != "week1":
-    raise ValueError("Only week1 is currently supported")
 if args.device != "gpu":
     raise ValueError("Only --device gpu is currently supported")
 if not torch.cuda.is_available():
     raise ValueError("CUDA is not available")
+
+if args.loader == "week1":
+    week = 1
+    generate_fn = simple_generate
+elif args.loader == "week2":
+    week = 2
+    generate_fn = simple_generate_with_kv_cache
+else:
+    raise ValueError("Only week1 and week2 are currently supported")
 
 args.model = models.shortcut_name_to_full_name(args.model)
 
@@ -54,7 +73,7 @@ hf_model.to("cuda")
 hf_model.eval()
 
 tokenizer = load_tokenizer(args.model)
-tiny_llm_model = models.dispatch_model(args.model, hf_model, week=1, device="cuda")
+tiny_llm_model = models.dispatch_model(args.model, hf_model, week=week, device="cuda")
 
 messages = [
     {"role": "system", "content": "You are a helpful assistant."},
@@ -72,5 +91,8 @@ sampler_fn = sampler.make_sampler(
     top_k=args.sampler_top_k,
 )
 
-print(f"Using {args.solution} week1 loader for {args.model} on cuda")
-simple_generate(tiny_llm_model, tokenizer, prompt, sampler=sampler_fn)
+print(f"Using {args.solution} {args.loader} loader for {args.model} on cuda")
+if week == 1:
+    generate_fn(tiny_llm_model, tokenizer, prompt, sampler=sampler_fn)
+else:
+    generate_fn(tiny_llm_model, tokenizer, prompt)

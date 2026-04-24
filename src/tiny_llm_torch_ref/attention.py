@@ -13,8 +13,14 @@ def scaled_dot_product_attention_simple(
     mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
-    A simple implementation of scaled dot product attention. Assuming Q, K, V are of the same shape.
-    Assuming mask is always a float array that you can add to the scores.
+    A simple implementation of scaled dot product attention.
+
+    Shapes:
+    - `query`: [B, H, L, D]
+    - `key`: [B, H, S, D]
+    - `value`: [B, H, S, D]
+    - `mask`: broadcastable to [B, H, L, S]
+    - returns: [B, H, L, D]
     """
     factor = 1.0 / math.sqrt(query.shape[-1]) if scale is None else scale
     scores = torch.matmul(query, key.swapaxes(-2, -1)) * factor
@@ -26,6 +32,12 @@ def scaled_dot_product_attention_simple(
 def causal_mask(
     L: int, S: int, dtype: torch.dtype, device: torch.device
 ) -> torch.Tensor:
+    """
+    Create a causal mask for attention scores.
+
+    Shapes:
+    - returns: [L, S]
+    """
     mask = torch.tril(
         torch.ones((L, S), device=device, dtype=torch.bool),
         diagonal=S - L,
@@ -41,9 +53,14 @@ def scaled_dot_product_attention_grouped(
     mask: torch.Tensor | str | None = None,
 ) -> torch.Tensor:
     """
-    Potential input of the mask:
-    - torch.Tensor that can broadcast to B * H_q * L * S, which needs to be reshaped to match multi-head dimensions
-    - None which will be ignored
+    Grouped-query attention.
+
+    Shapes:
+    - `query`: [B, H_q, L, D]
+    - `key`: [B, H_kv, S, D]
+    - `value`: [B, H_kv, S, D]
+    - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L, S]
+    - returns: [B, H_q, L, D]
     """
     expected_shape = query.shape
     *batch_shape, H_q, L, D = query.shape
@@ -108,6 +125,14 @@ class SimpleMultiHeadAttention:
         value: torch.Tensor,
         mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """
+        Shapes:
+        - `query`: [B, L, E]
+        - `key`: [B, S, E]
+        - `value`: [B, S, E]
+        - `mask`: broadcastable to [B, H, L, S]
+        - returns: [B, L, E]
+        """
         N, L, _ = query.shape
         assert query.shape == key.shape == value.shape
 

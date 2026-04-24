@@ -8,6 +8,11 @@ class RMSNorm:
         self.weight = weight.to(dtype=torch.float32)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L, E]
+        - returns: [B, L, E]
+        """
         original_dtype = x.dtype
         x = x.to(dtype=torch.float32)
         return (
