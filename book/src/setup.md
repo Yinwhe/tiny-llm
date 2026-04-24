@@ -31,7 +31,7 @@ src/tiny_llm -- your implementation
 src/tiny_llm_ref -- reference implementation from the original MLX course
 src/tiny_llm_torch_ref -- migrated Torch/CUDA reference implementation
 tests/ -- unit tests for your implementation
-tests_refsol/ -- unit tests for the reference implementation
+tests_refsol/ -- original MLX reference tests kept during migration
 tests_torch_ref/ -- Torch/CUDA tests for migrated chapters
 book/ -- the book
 ```
@@ -64,27 +64,33 @@ The current `pyproject.toml` still contains MLX dependencies from the original p
 ## Check the Installation
 
 ```bash
-pdm run check-cuda-installation
+pdm run check-installation
 ```
 
-This is only an environment check. It imports PyTorch, runs a CPU tensor add, runs a CUDA tensor add, and prints the CUDA device.
+This checks PyTorch on CPU and CUDA, and prints the detected CUDA device.
 
 ## Run Unit Tests
 
-For the migrated CUDA/Torch chapters, run the Torch reference tests directly:
+Use the same `pdm` workflow as the original book:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py
+pdm run test --week 1 --day 1
+pdm run test --week 1 --day 2
 ```
 
-The original book workflow command is still available:
+To run a specific task with a pytest filter:
 
 ```bash
-pdm run test
+pdm run test --week 1 --day 1 -- -k task_1
 ```
 
-That command still follows the original book workflow and uses `tests/` plus `tests_refsol`. For the CUDA branch, use `tests_torch_ref` for migrated chapters.
+To run the Torch/CUDA reference tests directly:
+
+```bash
+pdm run test-refsol --week 1 --day 1
+```
+
+The `pdm run test` command copies the corresponding file from `tests_torch_ref/` into `tests/` and runs it against `src/tiny_llm`.
 
 ## Download the Model Parameters
 
@@ -103,15 +109,17 @@ The original MLX course used models such as `Qwen/Qwen2-0.5B-Instruct-MLX`. Thos
 
 ## Run the Model
 
-The original command was:
+Run the reference implementation:
 
 ```bash
-pdm run main --solution ref --loader week1
+pdm run main --solution ref --loader week1 --model qwen2-0.5b --device gpu
 ```
 
-That command still uses `mlx_lm`, MLX model weights, and the original MLX reference implementation. It is not the CUDA branch smoke test.
+Run your own implementation once you have completed the corresponding chapter:
 
-The CUDA model-running path is not wired up yet in this branch.
+```bash
+pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --device gpu
+```
 
 In week 2, we will write some kernels in C++/CUDA. The original course used C++/Metal for MLX; this CUDA branch will replace that path with CUDA-oriented tooling.
 

@@ -1,16 +1,9 @@
-import mlx.core as mx
-from .basics import silu
-from .attention import (
-    scaled_dot_product_attention_grouped,
-    flash_attention,
-    causal_mask,
-)
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
 from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
+
+import torch
+
 from .kv_cache import TinyKvCache
+from .quantize import QuantizedWeights
 
 
 class Qwen3MultiHeadAttention:
@@ -24,8 +17,8 @@ class Qwen3MultiHeadAttention:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        q_norm: mx.array,
-        k_norm: mx.array,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         rms_norm_eps: float = 1e-5,
@@ -35,11 +28,11 @@ class Qwen3MultiHeadAttention:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offsets: list[int],
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
@@ -58,7 +51,7 @@ class Qwen3MLP:
         self.w_up = w_up
         self.w_down = w_down
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
         pass
 
 
@@ -75,13 +68,13 @@ class Qwen3TransformerBlock:
         wk: QuantizedWeights,
         wv: QuantizedWeights,
         wo: QuantizedWeights,
-        q_norm: mx.array,
-        k_norm: mx.array,
+        q_norm: torch.Tensor,
+        k_norm: torch.Tensor,
         w_gate: QuantizedWeights,
         w_up: QuantizedWeights,
         w_down: QuantizedWeights,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -90,22 +83,22 @@ class Qwen3TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
+        x: torch.Tensor,
         offset: int,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
         pass
 
 
-def assert_dtype(weights: mx.array, dtype: mx.Dtype):
+def assert_dtype(weights: torch.Tensor, dtype: torch.dtype):
     if weights.dtype != dtype:
         raise ValueError(f"{weights.dtype} != {dtype}")
     else:
         return weights
 
 
-def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: mx.Dtype):
+def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: torch.dtype):
     if weights.scales.dtype != dtype:
         raise ValueError(f"{weights.scales.dtype} != {dtype}")
     if weights.biases.dtype != dtype:
@@ -117,15 +110,15 @@ def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: mx.Dtype):
 class Qwen3Model:
     def __init__(
         self,
-        mlx_model: Any,
+        torch_model: Any,
         enable_flash_attn: bool = False,
     ):
         pass
 
     def __call__(
         self,
-        inputs: mx.array,
+        inputs: torch.Tensor,
         offset: int,
         cache: list[TinyKvCache],
-    ) -> mx.array:
+    ) -> torch.Tensor:
         pass

@@ -54,7 +54,7 @@ sequence length.
 You can test your implementation by running the following command:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_3.py -k task_1
+pdm run test --week 1 --day 3 -- -k task_1
 ```
 
 ## Task 2: Causal Masking
@@ -82,7 +82,7 @@ Please implement the `causal_mask` function in `src/tiny_llm/attention.py` and t
 You can test your implementation by running the following command:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_3.py -k task_2
+pdm run test --week 1 --day 3 -- -k task_2
 ```
 
 ## Task 3: Qwen2 Grouped Query Attention
@@ -113,13 +113,13 @@ Keep in mind that you should use non-traditional RoPE.
 You can test your implementation by running the following command:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_3.py -k task_3
+pdm run test --week 1 --day 3 -- -k task_3
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
 ```bash
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_3.py
+pdm run test --week 1 --day 3
 ```
 
 {{#include copyright.md}}

@@ -1,32 +1,20 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-import mlx.core as mx
+import torch
 
 
 class TinyKvCache(ABC):
     @abstractmethod
     def update_and_fetch(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         """
         Update the key-value cache and fetch the updated key-value cache.
-
-        Args:
-            key: The key to update the cache with.
-            value: The value to update the cache with.
-            mask_length: The length of the mask (only used in batching mode)
-            mask: The mask to use (only used in batching mode)
-
-        Returns:
-            A tuple of the updated key-value cache, the updated value, the sequence length, and the mask.
-            In week 2 day 1, we only need to return the updated key-value cache, the updated value.
-            In week 2 day 6/7, we need to return the updated key-value cache, the updated value, the sequence length, and the mask.
-            so that the batching kv cache can use this information to generate the mask.
         """
 
 
@@ -37,11 +25,11 @@ class BatchingKvCache(TinyKvCache):
 
     def update_and_fetch(
         self,
-        keys: mx.array,
-        values: mx.array,
+        keys: torch.Tensor,
+        values: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         pass
 
     def add_request(self, prefilled: TinyKvCache, id: int):
@@ -58,9 +46,9 @@ class TinyKvFullCache(TinyKvCache):
 
     def update_and_fetch(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         pass

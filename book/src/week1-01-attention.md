@@ -72,8 +72,8 @@ mask: 1 x H x L x L
 
 At the end of this task, you should be able to pass the following tests:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py -k task_1
+```bash
+pdm run test --week 1 --day 1 -- -k task_1
 ```
 
 ## Task 2: Implement `SimpleMultiHeadAttention`
@@ -123,14 +123,14 @@ w_o: E x (H x D)
 
 At the end of the task, you should be able to pass the following tests:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py -k task_2
+```bash
+pdm run test --week 1 --day 1 -- -k task_2
 ```
 
 You can run all tests for the day with:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_1.py
+```bash
+pdm run test --week 1 --day 1
 ```
 
 {{#include copyright.md}}

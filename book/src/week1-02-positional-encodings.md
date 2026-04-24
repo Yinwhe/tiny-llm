@@ -57,8 +57,8 @@ You can do this by reshaping `x` to (N, L, H, D // 2, 2) and then applying the a
 
 You can test your implementation by running the following command:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py -k task_1
+```bash
+pdm run test --week 1 --day 2 -- -k task_1
 ```
 
 ## Task 2: Implement `RoPE` in the non-traditional form
@@ -83,14 +83,14 @@ frequencies to each half separately.
 
 You can test your implementation by running the following command:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py -k task_2
+```bash
+pdm run test --week 1 --day 2 -- -k task_2
 ```
 
 At the end of the day, you should be able to pass all tests of this day:
 
-```
-.venv/bin/pytest -q tests_torch_ref/test_week_1_day_2.py
+```bash
+pdm run test --week 1 --day 2
 ```
 
 {{#include copyright.md}}
