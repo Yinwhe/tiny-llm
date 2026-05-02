@@ -10,3 +10,4 @@ from .qwen2_week2 import *
 from .sampler import *
 from .models import *
 from .tokenizer import *
+from .quantize import *

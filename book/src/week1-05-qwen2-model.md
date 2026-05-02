@@ -5,9 +5,9 @@ In day 5, we will implement the Qwen2 model.
 Before we start, please make sure you have downloaded the models:
 
 ```bash
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct
-huggingface-cli download Qwen/Qwen2-7B-Instruct
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-7B-Instruct-AWQ
 ```
 
 Otherwise, some of the tests will be skipped.
@@ -47,9 +47,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct
-huggingface-cli download Qwen/Qwen2-7B-Instruct
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-7B-Instruct-AWQ
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_1
 ```
@@ -89,9 +89,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so; we need to tokenizers
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct
-huggingface-cli download Qwen/Qwen2-7B-Instruct
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-7B-Instruct-AWQ
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_2
 ```
@@ -145,8 +145,9 @@ The input to the model is a sequence of tokens. The output is the logits (probab
 In the next day, we will implement the process of generating the response from the model, and decide the next token
 based on the probability distribution output.
 
-Also note that the Hugging Face PyTorch models we are using here already expose regular tensors for the weights, so you
-do not need an extra dequantization step before loading them into our tiny-llm model.
+Also note that the Hugging Face PyTorch checkpoints we are using here are AWQ-quantized. In week 1 we still implement
+the model with regular dense tensor operations, so the linear weights need to be dequantized before loading them into
+our tiny-llm model.
 
 You also need to make sure that you set `mask=causal` when the input sequence is longer than 1. We will explain why
 in the next day.
@@ -155,9 +156,9 @@ You should pass all tests for this task by running:
 
 ```bash
 # Download the models if you haven't done so
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct
-huggingface-cli download Qwen/Qwen2-7B-Instruct
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-7B-Instruct-AWQ
 # Run the tests
 pdm run test --week 1 --day 5 -- -k task_3
 ```

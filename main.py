@@ -61,7 +61,7 @@ elif args.loader == "week2":
 else:
     raise ValueError("Only week1 and week2 are currently supported")
 
-args.model = models.shortcut_name_to_full_name(args.model)
+args.model = models.shortcut_name_to_full_name(args.model, week=week)
 
 hf_model = AutoModelForCausalLM.from_pretrained(
     args.model,

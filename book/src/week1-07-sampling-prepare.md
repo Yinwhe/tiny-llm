@@ -76,14 +76,14 @@ to make some operations run faster. You will need a working CUDA toolchain and C
     pdm run check-installation
     ```
 
-You can test your installation by compiling the code in `src/extensions`:
+You can test your installation by compiling the code in `src/extensions_torch`:
 
 ```bash
-pdm run build-ext
-pdm run build-ext-test
+pdm run build-ext-torch
+pdm run build-ext-torch-ref
 ```
 
-It should print `correct: True`.
+Both commands should complete without build errors.
 
 If you are not familiar with C++ or CUDA programming, we also suggest doing some small exercises to get familiar with
 them. You can implement some element-wise operations like `exp`, `sin`, `cos` and replace the PyTorch ones in your model

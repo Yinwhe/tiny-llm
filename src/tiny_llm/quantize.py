@@ -11,13 +11,13 @@ class QuantizedWeights:
     def __init__(
         self,
         scales: torch.Tensor,
-        biases: torch.Tensor,
+        zeros: torch.Tensor,
         group_size: int,
         bits: int,
         weight: torch.Tensor,
     ):
         self.scales = scales
-        self.biases = biases
+        self.zeros = zeros
         self.group_size = group_size
         self.bits = bits
         self.weight = weight
@@ -29,7 +29,7 @@ class QuantizedWeights:
 
 def quantized_matmul(
     scales: torch.Tensor,
-    biases: torch.Tensor,
+    zeros: torch.Tensor,
     group_size: int,
     bits: int,
     a: torch.Tensor,

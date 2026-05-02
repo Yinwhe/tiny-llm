@@ -4,10 +4,11 @@ In this week, we will start from the basic matrix operations and see how those t
 Qwen2 model parameters into a model that generates text. We will implement the neural network layers used in the Qwen2
 model using PyTorch tensor APIs on CUDA.
 
-We will use the Qwen2-7B-Instruct model for this week. As we need to dequantize the model parameters, the model of 4GB
-download size needs 20GB of memory in week 1. If you do not have enough memory, you can consider using the smaller 0.5B model.
+We will use the Qwen2-7B-Instruct-AWQ model for this week. As we need to dequantize the model parameters in week 1, the
+model of around 4GB download size needs much more memory after loading. If you do not have enough memory, you can consider
+using the smaller 0.5B model.
 
-In this CUDA branch, we use the standard Hugging Face Qwen2 weights rather than the MLX-specific model packages.
+In this CUDA branch, we use the Hugging Face Qwen2 AWQ checkpoints rather than the MLX-specific model packages.
 
 ## What We will Cover
 

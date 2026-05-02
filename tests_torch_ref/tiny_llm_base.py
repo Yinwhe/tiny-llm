@@ -1,5 +1,6 @@
 from tiny_llm_torch_ref import (
     Embedding,
+    QuantizedWeights,
     Qwen2MLP,
     Qwen2ModelWeek1,
     Qwen2ModelWeek2,
@@ -10,7 +11,10 @@ from tiny_llm_torch_ref import (
     SimpleMultiHeadAttention,
     TinyKvFullCache,
     causal_mask,
+    dequantize_linear,
     linear,
+    quantized_linear,
+    quantized_matmul,
     scaled_dot_product_attention_grouped,
     scaled_dot_product_attention_simple,
     silu,
@@ -19,6 +23,7 @@ from tiny_llm_torch_ref import (
 
 __all__ = [
     "Embedding",
+    "QuantizedWeights",
     "Qwen2MLP",
     "Qwen2ModelWeek1",
     "Qwen2ModelWeek2",
@@ -29,7 +34,10 @@ __all__ = [
     "SimpleMultiHeadAttention",
     "TinyKvFullCache",
     "causal_mask",
+    "dequantize_linear",
     "linear",
+    "quantized_linear",
+    "quantized_matmul",
     "scaled_dot_product_attention_grouped",
     "scaled_dot_product_attention_simple",
     "silu",

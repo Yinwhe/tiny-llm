@@ -9,6 +9,17 @@ from .embedding import Embedding
 from .kv_cache import TinyKvCache
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
+from .quantize import QuantizedWeights, quantized_linear
+
+
+def apply_linear(
+    x: torch.Tensor,
+    weight: torch.Tensor | QuantizedWeights,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if isinstance(weight, QuantizedWeights):
+        return quantized_linear(x, weight, bias)
+    return linear(x, weight, bias)
 
 
 class Qwen2MultiHeadAttention:
@@ -17,10 +28,10 @@ class Qwen2MultiHeadAttention:
         hidden_size: int,
         num_heads: int,
         num_kv_heads: int,
-        wq: torch.Tensor,
-        wk: torch.Tensor,
-        wv: torch.Tensor,
-        wo: torch.Tensor,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
         bq: torch.Tensor,
         bk: torch.Tensor,
         bv: torch.Tensor,
@@ -53,7 +64,7 @@ class Qwen2MultiHeadAttention:
             max_seq_len,
             theta,
             traditional=False,
-            device=wq.device,
+            device=wq.scales.device if isinstance(wq, QuantizedWeights) else wq.device,
         )
 
     def __call__(
@@ -76,13 +87,13 @@ class Qwen2MultiHeadAttention:
                 f"cache offset {cache.offset} must match input offset {offset}"
             )
 
-        projection_q = linear(x, self.wq, self.bq).reshape(
+        projection_q = apply_linear(x, self.wq, self.bq).reshape(
             batch_size, seq_len, self.num_heads, self.head_dim
         )
-        projection_k = linear(x, self.wk, self.bk).reshape(
+        projection_k = apply_linear(x, self.wk, self.bk).reshape(
             batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
-        projection_v = linear(x, self.wv, self.bv).reshape(
+        projection_v = apply_linear(x, self.wv, self.bv).reshape(
             batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
 
@@ -108,7 +119,7 @@ class Qwen2MultiHeadAttention:
         ).to(dtype=x.dtype)
         output = output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
 
-        return linear(output, self.wo)
+        return apply_linear(output, self.wo)
 
 
 class Qwen2MLP:
@@ -116,9 +127,9 @@ class Qwen2MLP:
         self,
         dim: int,
         hidden_dim: int,
-        w_gate: torch.Tensor,
-        w_up: torch.Tensor,
-        w_down: torch.Tensor,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
     ):
         self.dim = dim
         self.hidden_dim = hidden_dim
@@ -132,7 +143,10 @@ class Qwen2MLP:
         - `x`: [B, L, E]
         - returns: [B, L, E]
         """
-        return linear(silu(linear(x, self.w_gate)) * linear(x, self.w_up), self.w_down)
+        return apply_linear(
+            silu(apply_linear(x, self.w_gate)) * apply_linear(x, self.w_up),
+            self.w_down,
+        )
 
 
 class Qwen2TransformerBlock:
@@ -143,16 +157,16 @@ class Qwen2TransformerBlock:
         hidden_size: int,
         intermediate_size: int,
         rms_norm_eps: float,
-        wq: torch.Tensor,
-        wk: torch.Tensor,
-        wv: torch.Tensor,
-        wo: torch.Tensor,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
         bq: torch.Tensor,
         bk: torch.Tensor,
         bv: torch.Tensor,
-        w_gate: torch.Tensor,
-        w_up: torch.Tensor,
-        w_down: torch.Tensor,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
         w_input_layernorm: torch.Tensor,
         w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
@@ -230,6 +244,26 @@ class Qwen2ModelWeek2:
                 return torch.zeros(out_features, device=device, dtype=precision)
             return cast(bias)
 
+        def cast_weight(torch_layer: Any) -> torch.Tensor | QuantizedWeights:
+            required_attrs = ("qweight", "qzeros", "scales", "group_size", "w_bit")
+            if all(hasattr(torch_layer, attr) for attr in required_attrs):
+                return QuantizedWeights(
+                    scales=torch_layer.scales.detach().to(
+                        device=device, dtype=precision
+                    ).contiguous(),
+                    zeros=torch_layer.qzeros.detach().to(
+                        device=device, dtype=torch.int32
+                    ).contiguous(),
+                    group_size=int(torch_layer.group_size),
+                    bits=int(torch_layer.w_bit),
+                    weight=torch_layer.qweight.detach().to(
+                        device=device, dtype=torch.int32
+                    ).contiguous(),
+                )
+            if hasattr(torch_layer, "weight"):
+                return cast(torch_layer.weight)
+            raise RuntimeError("unsupported linear layer type for Qwen2ModelWeek2")
+
         self.num_hidden_layers = config.num_hidden_layers
         self.hidden_size = config.hidden_size
         self.vocab_size = config.vocab_size
@@ -253,16 +287,16 @@ class Qwen2ModelWeek2:
                 hidden_size=config.hidden_size,
                 intermediate_size=config.intermediate_size,
                 rms_norm_eps=config.rms_norm_eps,
-                wq=cast(attention.q_proj.weight),
-                wk=cast(attention.k_proj.weight),
-                wv=cast(attention.v_proj.weight),
-                wo=cast(attention.o_proj.weight),
+                wq=cast_weight(attention.q_proj),
+                wk=cast_weight(attention.k_proj),
+                wv=cast_weight(attention.v_proj),
+                wo=cast_weight(attention.o_proj),
                 bq=cast_bias(attention.q_proj.bias, attention.q_proj.out_features),
                 bk=cast_bias(attention.k_proj.bias, attention.k_proj.out_features),
                 bv=cast_bias(attention.v_proj.bias, attention.v_proj.out_features),
-                w_gate=cast(mlp.gate_proj.weight),
-                w_up=cast(mlp.up_proj.weight),
-                w_down=cast(mlp.down_proj.weight),
+                w_gate=cast_weight(mlp.gate_proj),
+                w_up=cast_weight(mlp.up_proj),
+                w_down=cast_weight(mlp.down_proj),
                 w_input_layernorm=cast(transformer_layer.input_layernorm.weight),
                 w_post_attention_layernorm=cast(
                     transformer_layer.post_attention_layernorm.weight
@@ -281,7 +315,7 @@ class Qwen2ModelWeek2:
         if config.tie_word_embeddings:
             self.w_lm_head = None
         else:
-            self.w_lm_head = cast(transformers_model.lm_head.weight)
+            self.w_lm_head = cast_weight(transformers_model.lm_head)
 
     def __call__(
         self,
@@ -301,5 +335,5 @@ class Qwen2ModelWeek2:
             )
         hidden = self.norm(hidden)
         if self.w_lm_head is not None:
-            return linear(hidden, self.w_lm_head)
+            return apply_linear(hidden, self.w_lm_head)
         return self.embedding.as_linear(hidden)
