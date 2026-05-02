@@ -8,6 +8,7 @@ from .basics import linear, silu
 from .embedding import Embedding
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
+from .quantize import dequantize_linear
 
 
 class Qwen2MultiHeadAttention:
@@ -196,6 +197,9 @@ class Qwen2ModelWeek1:
         def cast(weight: torch.Tensor) -> torch.Tensor:
             return weight.detach().to(device=device, dtype=precision).contiguous()
 
+        def cast_linear_weight(torch_layer: Any) -> torch.Tensor:
+            return cast(dequantize_linear(torch_layer))
+
         def cast_bias(
             bias: torch.Tensor | None,
             out_features: int,
@@ -227,16 +231,16 @@ class Qwen2ModelWeek1:
                 hidden_size=config.hidden_size,
                 intermediate_size=config.intermediate_size,
                 rms_norm_eps=config.rms_norm_eps,
-                wq=cast(attention.q_proj.weight),
-                wk=cast(attention.k_proj.weight),
-                wv=cast(attention.v_proj.weight),
-                wo=cast(attention.o_proj.weight),
+                wq=cast_linear_weight(attention.q_proj),
+                wk=cast_linear_weight(attention.k_proj),
+                wv=cast_linear_weight(attention.v_proj),
+                wo=cast_linear_weight(attention.o_proj),
                 bq=cast_bias(attention.q_proj.bias, attention.q_proj.out_features),
                 bk=cast_bias(attention.k_proj.bias, attention.k_proj.out_features),
                 bv=cast_bias(attention.v_proj.bias, attention.v_proj.out_features),
-                w_gate=cast(mlp.gate_proj.weight),
-                w_up=cast(mlp.up_proj.weight),
-                w_down=cast(mlp.down_proj.weight),
+                w_gate=cast_linear_weight(mlp.gate_proj),
+                w_up=cast_linear_weight(mlp.up_proj),
+                w_down=cast_linear_weight(mlp.down_proj),
                 w_input_layernorm=cast(transformer_layer.input_layernorm.weight),
                 w_post_attention_layernorm=cast(
                     transformer_layer.post_attention_layernorm.weight
@@ -254,7 +258,7 @@ class Qwen2ModelWeek1:
         if config.tie_word_embeddings:
             self.w_lm_head = None
         else:
-            self.w_lm_head = cast(transformers_model.lm_head.weight)
+            self.w_lm_head = cast_linear_weight(transformers_model.lm_head)
 
     def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
         """

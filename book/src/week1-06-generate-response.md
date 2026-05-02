@@ -60,9 +60,9 @@ You can test your implementation by running the following command:
 
 ```bash
 # Download the models if you haven't done so
-huggingface-cli download Qwen/Qwen2-0.5B-Instruct
-huggingface-cli download Qwen/Qwen2-1.5B-Instruct
-huggingface-cli download Qwen/Qwen2-7B-Instruct
+huggingface-cli download Qwen/Qwen2-0.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-1.5B-Instruct-AWQ
+huggingface-cli download Qwen/Qwen2-7B-Instruct-AWQ
 # Run the tests
 pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b \
   --device gpu --prompt "Give me a short introduction to large language model"
