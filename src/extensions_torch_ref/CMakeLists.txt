@@ -38,6 +38,7 @@ add_library(tiny_llm_ext_torch_ref)
 target_sources(
   tiny_llm_ext_torch_ref
   PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/utils.cpp
 )
@@ -68,6 +69,7 @@ if(CMAKE_CUDA_COMPILER)
   target_sources(
     tiny_llm_ext_torch_ref
     PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/src/flash_attention.cu
     ${CMAKE_CURRENT_LIST_DIR}/src/quantized_matmul.cu
   )
 

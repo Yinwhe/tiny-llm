@@ -1,6 +1,7 @@
 from .attention import (
     SimpleMultiHeadAttention,
     causal_mask,
+    flash_attention,
     scaled_dot_product_attention_grouped,
     scaled_dot_product_attention_simple,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "TinyKvFullCache",
     "dequantize_linear",
     "causal_mask",
+    "flash_attention",
     "linear",
     "load_tokenizer",
     "models",

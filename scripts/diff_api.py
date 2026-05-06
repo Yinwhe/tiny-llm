@@ -2,8 +2,8 @@ import inspect
 import sys
 import difflib
 
-import tiny_llm
-import tiny_llm_ref
+import tiny_llm_torch
+import tiny_llm_torch_ref
 
 
 def export_public_members(module):
@@ -48,20 +48,20 @@ def stringify_member(members):
     ]
 
 
-start_code = stringify_member(export_public_members(tiny_llm))
-ref_sol = stringify_member(export_public_members(tiny_llm_ref))
+start_code = stringify_member(export_public_members(tiny_llm_torch))
+ref_sol = stringify_member(export_public_members(tiny_llm_torch_ref))
 
-print("--- tiny_llm/apis.txt ---", flush=True)
+print("--- tiny_llm_torch/apis.txt ---", flush=True)
 sys.stdout.writelines(start_code)
-print("--- tiny_llm_ref/apis.txt ---", flush=True)
+print("--- tiny_llm_torch_ref/apis.txt ---", flush=True)
 sys.stdout.writelines(ref_sol)
 
 result = list(
     difflib.unified_diff(
         start_code,
         ref_sol,
-        fromfile="tiny_llm/apis.txt",
-        tofile="tiny_llm_ref/apis.txt",
+        fromfile="tiny_llm_torch/apis.txt",
+        tofile="tiny_llm_torch_ref/apis.txt",
         n=0,
     )
 )

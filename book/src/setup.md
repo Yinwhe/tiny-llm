@@ -27,7 +27,8 @@ cd tiny-llm
 The repository is organized as follows:
 
 ```
-src/tiny_llm -- your implementation
+src/tiny_llm -- original learner skeleton from the MLX course
+src/tiny_llm_torch -- your Torch/CUDA learner implementation
 src/tiny_llm_ref -- reference implementation from the original MLX course
 src/tiny_llm_torch_ref -- migrated Torch/CUDA reference implementation
 tests/ -- unit tests for your implementation
@@ -90,7 +91,7 @@ To run the Torch/CUDA reference tests directly:
 pdm run test-refsol --week 1 --day 1
 ```
 
-The `pdm run test` command copies the corresponding file from `tests_torch_ref/` into `tests/` and runs it against `src/tiny_llm`.
+The `pdm run test` command copies the corresponding file from `tests_torch_ref/` into `tests/` and runs it against `src/tiny_llm_torch`.
 
 ## Download the Model Parameters
 
@@ -118,7 +119,7 @@ pdm run main --solution ref --loader week1 --model qwen2-0.5b --device gpu
 Run your own implementation once you have completed the corresponding chapter:
 
 ```bash
-pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --device gpu
+pdm run main --solution tiny_llm_torch --loader week1 --model qwen2-0.5b --device gpu
 ```
 
 In week 2, we will write some kernels in C++/CUDA. The original course used C++/Metal for MLX; this CUDA branch will replace that path with CUDA-oriented tooling.

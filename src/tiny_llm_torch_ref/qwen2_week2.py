@@ -3,7 +3,7 @@ from typing import Any
 
 import torch
 
-from .attention import scaled_dot_product_attention_grouped
+from .attention import flash_attention, scaled_dot_product_attention_grouped
 from .basics import linear, silu
 from .embedding import Embedding
 from .kv_cache import TinyKvCache
@@ -110,13 +110,22 @@ class Qwen2MultiHeadAttention:
             mask=mask,
         )
 
-        output = scaled_dot_product_attention_grouped(
-            projection_q.to(dtype=torch.float32),
-            projection_k.to(dtype=torch.float32),
-            projection_v.to(dtype=torch.float32),
-            scale=self.scale,
-            mask=mask,
-        ).to(dtype=x.dtype)
+        if self.use_flash_attention:
+            output = flash_attention(
+                projection_q.to(dtype=torch.float32),
+                projection_k.to(dtype=torch.float32),
+                projection_v.to(dtype=torch.float32),
+                scale=self.scale,
+                mask=mask,
+            ).to(dtype=x.dtype)
+        else:
+            output = scaled_dot_product_attention_grouped(
+                projection_q.to(dtype=torch.float32),
+                projection_k.to(dtype=torch.float32),
+                projection_v.to(dtype=torch.float32),
+                scale=self.scale,
+                mask=mask,
+            ).to(dtype=x.dtype)
         output = output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
 
         return apply_linear(output, self.wo)

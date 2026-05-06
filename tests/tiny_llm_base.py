@@ -1,4 +1,4 @@
-from tiny_llm import (
+from tiny_llm_torch import (
     Embedding,
     QuantizedWeights,
     Qwen2MLP,
