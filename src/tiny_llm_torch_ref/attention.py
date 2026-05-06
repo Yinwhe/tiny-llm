@@ -1,8 +1,22 @@
 import math
+from functools import lru_cache
 
 import torch
 
+from extensions_torch_ref import tiny_llm_ext_torch_ref
+
 from .basics import linear, softmax
+
+
+@lru_cache(maxsize=None)
+def _cached_causal_mask(
+    L: int,
+    S: int,
+    device_type: str,
+    device_index: int | None,
+) -> torch.Tensor:
+    device = torch.device(device_type, device_index) if device_index is not None else torch.device(device_type)
+    return causal_mask(L, S, torch.float32, device)
 
 
 def scaled_dot_product_attention_simple(
@@ -92,6 +106,64 @@ def scaled_dot_product_attention_grouped(
         raise NotImplementedError
 
     return torch.matmul(softmax(scores, axis=-1), value).reshape(expected_shape)
+
+
+def flash_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    scale: float | None = None,
+    mask: torch.Tensor | str | None = None,
+) -> torch.Tensor:
+    """
+    Flash attention wrapper around the C++/CUDA extension.
+
+    Shapes:
+    - `query`: [B..., H_q, L, E]
+    - `key`: [B..., H_kv, S, E]
+    - `value`: [B..., H_kv, S, E]
+    - `mask`: `None`, `"causal"`, or tensor broadcastable to [B..., H_q, L, S]
+    - returns: [B..., H_q, L, E]
+    """
+    expected_shape = query.shape
+    *batch_shape, H_q, L, E = query.shape
+    _, H, S, _ = key.shape
+
+    factor = 1.0 / math.sqrt(E) if scale is None else float(scale)
+
+    query = query.reshape(-1, L, E).contiguous()
+    key = key.reshape(-1, S, E).contiguous()
+    value = value.reshape(-1, S, E).contiguous()
+
+    is_causal = isinstance(mask, str) and mask == "causal"
+    N = query.shape[0]
+
+    if is_causal:
+        mask = torch.broadcast_to(
+            _cached_causal_mask(L, S, query.device.type, query.device.index),
+            (*batch_shape, H_q, L, S),
+        )
+    elif mask is None:
+        mask = torch.broadcast_to(
+            torch.zeros((L, S), dtype=torch.float32, device=query.device),
+            (*batch_shape, H_q, L, S),
+        )
+    else:
+        mask = torch.broadcast_to(mask, (*batch_shape, H_q, L, S))
+
+    mask = mask.reshape(N, L, S).contiguous().to(dtype=torch.float32)
+
+    result = tiny_llm_ext_torch_ref.flash_attention(
+        query,
+        key,
+        value,
+        mask,
+        factor,
+        is_causal=is_causal,
+        num_heads=H_q,
+        num_kv_heads=H,
+    )
+    return result.reshape(expected_shape).contiguous()
 
 
 class SimpleMultiHeadAttention:

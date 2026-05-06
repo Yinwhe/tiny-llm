@@ -21,4 +21,18 @@ PYBIND11_MODULE(_ext, m) {
           R"(
         AWQ-style int4 quantized matmul.
       )");
+
+    m.def("flash_attention",
+          &tiny_llm_ext_torch_ref::flash_attention,
+          py::arg("q"),
+          py::arg("k"),
+          py::arg("v"),
+          py::arg("mask"),
+          py::arg("scale"),
+          py::arg("is_causal"),
+          py::arg("num_kv_heads"),
+          py::arg("num_heads"),
+          R"(
+        Tiled flash attention.
+      )");
 }
