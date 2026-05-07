@@ -1,6 +1,9 @@
 import inspect
 import sys
 import difflib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import tiny_llm_torch
 import tiny_llm_torch_ref
@@ -34,7 +37,8 @@ def export_public_members(module):
                         or attr_name == "__call__"
                     ):
                         path = f"{module.__name__}.{name}.{attr_name}"
-                        public_members_info.append((path, attr_value.__annotations__))
+                        annotations = getattr(attr_value, "__annotations__", {})
+                        public_members_info.append((path, annotations))
             if inspect.ismodule(member):
                 public_members_info.extend(export_public_members(member))
 
@@ -43,7 +47,9 @@ def export_public_members(module):
 
 def stringify_member(members):
     return [
-        f"{member[0]}: {str(member[1])}\n".replace("tiny_llm_ref.", "tiny_llm.")
+        f"{member[0]}: {str(member[1])}\n".replace(
+            "tiny_llm_torch_ref.", "tiny_llm_torch."
+        )
         for member in members
     ]
 

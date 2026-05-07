@@ -70,22 +70,18 @@ class Qwen2MultiHeadAttention:
     def __call__(
         self,
         x: torch.Tensor,
-        offset: int,
+        offsets: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
         mask: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """
         Shapes:
         - `x`: [B, L_new, E]
-        - `offset`: scalar start position of this chunk
+        - `offsets`: one start position per batch item, or a scalar shared by all
         - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L_new, L_total]
         - returns: [B, L_new, E]
         """
         batch_size, seq_len, _ = x.shape
-        if hasattr(cache, "offset"):
-            assert cache.offset == offset, (
-                f"cache offset {cache.offset} must match input offset {offset}"
-            )
 
         projection_q = apply_linear(x, self.wq, self.bq).reshape(
             batch_size, seq_len, self.num_heads, self.head_dim
@@ -97,8 +93,26 @@ class Qwen2MultiHeadAttention:
             batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
 
-        projection_q = self.rope(projection_q, offset=slice(offset, offset + seq_len))
-        projection_k = self.rope(projection_k, offset=slice(offset, offset + seq_len))
+        if isinstance(offsets, int):
+            offset_slices = [slice(int(offsets), int(offsets + seq_len))]
+        elif isinstance(offsets, torch.Tensor):
+            assert offsets.ndim == 1 and offsets.shape[0] == batch_size, (
+                f"offsets must have shape [{batch_size}]"
+            )
+            offset_slices = [
+                slice(int(offset.item()), int(offset.item() + seq_len))
+                for offset in offsets
+            ]
+        else:
+            assert len(offsets) == batch_size, (
+                f"offsets must have length {batch_size}"
+            )
+            offset_slices = [
+                slice(int(offset), int(offset + seq_len)) for offset in offsets
+            ]
+
+        projection_q = self.rope(projection_q, offset=offset_slices)
+        projection_k = self.rope(projection_k, offset=offset_slices)
         projection_q = projection_q.transpose(1, 2)
         projection_k = projection_k.transpose(1, 2)
         projection_v = projection_v.transpose(1, 2)
@@ -211,17 +225,17 @@ class Qwen2TransformerBlock:
     def __call__(
         self,
         x: torch.Tensor,
-        offset: int,
+        offsets: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
         mask: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """
         Shapes:
         - `x`: [B, L_new, E]
-        - `offset`: scalar start position of this chunk
+        - `offsets`: one start position per batch item, or a scalar shared by all
         - returns: [B, L_new, E]
         """
-        residual = self.self_attn(self.input_layernorm(x), offset, cache, mask)
+        residual = self.self_attn(self.input_layernorm(x), offsets, cache, mask)
         hidden = x + residual
         residual = self.mlp(self.post_attention_layernorm(hidden))
         return hidden + residual
@@ -329,7 +343,7 @@ class Qwen2ModelWeek2:
     def __call__(
         self,
         inputs: torch.Tensor,
-        offset: int,
+        offset: int | list[int] | torch.Tensor,
         cache: list[TinyKvCache],
     ) -> torch.Tensor:
         """

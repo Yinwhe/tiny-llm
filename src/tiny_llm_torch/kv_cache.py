@@ -14,7 +14,15 @@ class TinyKvCache(ABC):
         mask: torch.Tensor | str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         """
-        Update the key-value cache and fetch the updated key-value cache.
+        Update the key-value cache and fetch the full cached tensors.
+
+        Shapes:
+        - `key`: [B, H, L_new, D]
+        - `value`: [B, H, L_new, D]
+        - returns:
+          - `key`: [B, H, L_total, D]
+          - `value`: [B, H, L_total, D]
+          - `offset`: `L_total`
         """
 
 
@@ -30,6 +38,15 @@ class BatchingKvCache(TinyKvCache):
         mask_length: int | None = None,
         mask: torch.Tensor | str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
+        """
+        Shapes:
+        - `keys`: [B, H, L_new, D]
+        - `values`: [B, H, L_new, D]
+        - returns:
+          - `keys`: [B, H, S, D]
+          - `values`: [B, H, S, D]
+          - `mask`: [B, 1, L_new, S]
+        """
         pass
 
     def add_request(self, prefilled: TinyKvCache, id: int):
@@ -51,4 +68,13 @@ class TinyKvFullCache(TinyKvCache):
         mask_length: int | None = None,
         mask: torch.Tensor | str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
+        """
+        Shapes:
+        - `key`: [B, H, L_new, D]
+        - `value`: [B, H, L_new, D]
+        - returns:
+          - `key`: [B, H, L_total, D]
+          - `value`: [B, H, L_total, D]
+          - `offset`: `L_total`
+        """
         pass

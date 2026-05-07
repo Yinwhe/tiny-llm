@@ -6,6 +6,7 @@ from .attention import (
     scaled_dot_product_attention_simple,
 )
 from .basics import linear, silu, softmax
+from .batch import batch_generate
 from .embedding import Embedding
 from .generate import simple_generate, simple_generate_with_kv_cache
 from .kv_cache import BatchingKvCache, TinyKvCache, TinyKvFullCache
@@ -33,6 +34,7 @@ __all__ = [
     "TinyKvFullCache",
     "dequantize_linear",
     "causal_mask",
+    "batch_generate",
     "flash_attention",
     "linear",
     "load_tokenizer",

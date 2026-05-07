@@ -1,7 +1,17 @@
-from mlx_lm import load
-import mlx.core as mx
 import argparse
 import random
+import sys
+from pathlib import Path
+
+import torch
+import transformers.utils as transformers_utils
+import transformers.utils.import_utils as import_utils
+from transformers import AutoModelForCausalLM
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+import_utils._torchao_available = False
+transformers_utils.is_torchao_available = lambda *args, **kwargs: False
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model", type=str, default="qwen2-0.5b")
@@ -31,10 +41,9 @@ prompts = [
     "Give me a short introduction to large language model.",
 ]
 
-# shuffle prompts
 random.shuffle(prompts)
 
-parser.add_argument("--solution", type=str, default="tiny_llm")
+parser.add_argument("--solution", type=str, default="tiny_llm_torch")
 parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--batch-size", type=int, default=5)
 parser.add_argument("--prefill-step", type=int, default=128)
@@ -42,49 +51,65 @@ parser.add_argument("--enable-flash-attn", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
-if args.solution == "tiny_llm":
-    print("Using your tiny_llm solution")
-    from tiny_llm import models, batch_generate
-
-elif args.solution == "tiny_llm_ref" or args.solution == "ref":
-    print("Using tiny_llm_ref solution")
-    from tiny_llm_ref import models, batch_generate
-
+if args.solution in {"tiny_llm_torch", "user"}:
+    print("Using your tiny_llm_torch solution")
+    from tiny_llm_torch import batch_generate, load_tokenizer, models
+elif args.solution in {"tiny_llm_torch_ref", "torch_ref", "ref"}:
+    print("Using tiny_llm_torch_ref solution")
+    from tiny_llm_torch_ref import batch_generate, load_tokenizer, models
 else:
     raise ValueError(f"Solution {args.solution} not supported")
 
-args.model = models.shortcut_name_to_full_name(args.model)
-mlx_model, tokenizer = load(args.model)
+if args.device != "gpu":
+    raise ValueError("Only --device gpu is currently supported")
+if not torch.cuda.is_available():
+    raise ValueError("CUDA is not available")
 
-with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-    print(
-        f"Using week2 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+args.model = models.shortcut_name_to_full_name(args.model, week=2)
+hf_model = AutoModelForCausalLM.from_pretrained(
+    args.model,
+    local_files_only=True,
+    torch_dtype=torch.float16,
+    attn_implementation="eager",
+)
+hf_model.to("cuda")
+hf_model.eval()
+
+tokenizer = load_tokenizer(args.model)
+print(
+    f"Using week2 loader with flash_attn={args.enable_flash_attn} thinking={args.enable_thinking} for {args.model}"
+)
+tiny_llm_model = models.dispatch_model(
+    args.model,
+    hf_model,
+    week=2,
+    device="cuda",
+    enable_flash_attn=args.enable_flash_attn,
+)
+
+encoded_prompts = []
+for idx, prompt in enumerate(prompts):
+    print(f"Prompt {idx}: {prompt}")
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": prompt},
+    ]
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=args.enable_thinking,
     )
-    tiny_llm_model = models.dispatch_model(
-        args.model, mlx_model, week=2, enable_flash_attn=args.enable_flash_attn
-    )
-    encoded_prompts = []
-    for idx, prompt in enumerate(prompts):
-        print(f"Prompt {idx}: {prompt}")
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt},
-        ]
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=args.enable_thinking,
-        )
-        encoded_prompts.append(prompt)
-    result = batch_generate(
-        tiny_llm_model,
-        tokenizer,
-        encoded_prompts,
-        batch_size=args.batch_size,
-        prefill_step=args.prefill_step,
-    )
-    for prompt_idx, text in result:
-        print(f"--- {prompt_idx} ---")
-        print(f"Q: {prompts[prompt_idx]}")
-        print(f"A: {text}")
+    encoded_prompts.append(prompt)
+
+result = batch_generate(
+    tiny_llm_model,
+    tokenizer,
+    encoded_prompts,
+    batch_size=args.batch_size,
+    prefill_step=args.prefill_step,
+)
+for prompt_idx, text in result:
+    print(f"--- {prompt_idx} ---")
+    print(f"Q: {prompts[prompt_idx]}")
+    print(f"A: {text}")

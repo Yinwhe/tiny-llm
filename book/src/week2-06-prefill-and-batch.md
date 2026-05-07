@@ -46,8 +46,8 @@ This is the same masking logic you implemented in Week 1.
 ## Task 1: Batch RoPE and Causal Mask for Prefill
 
 ```
-src/tiny_llm/positional_encoding.py
-src/tiny_llm/attention.py::causal_mask
+src/tiny_llm_torch/positional_encoding.py
+src/tiny_llm_torch/attention.py::causal_mask
 ```
 
 Ensure your RoPE implementation accepts a `list[slice]` of offsets (one slice for sequence in the batch). Also, make sure your mask implementation correctly handles the case where `L != S`.
@@ -61,7 +61,7 @@ pdm run test --week 2 --day 6 -- -k task_1
 ## Task 2: Batch KV Cache
 
 ```
-src/tiny_llm/kv_cache.py::BatchingKvCache
+src/tiny_llm_torch/kv_cache.py::BatchingKvCache
 ```
 
 The batch KV cache is a collection of KV caches, one for each request. A challenge here is generating a `BxHxLxS` mask for the batch, since requests can have different lengths.
@@ -93,7 +93,7 @@ pdm run test --week 2 --day 6 -- -k task_2
 ## Task 3: Handle Batches in the Model
 
 ```
-src/tiny_llm/qwen2_week2.py
+src/tiny_llm_torch/qwen2_week2.py
 ```
 
 Ensure your model can handle multiple requests simultaneously. You should also use the masks returned by the batch KV cache.
@@ -107,7 +107,7 @@ pdm run test --week 2 --day 6 -- -k task_3
 ## Task 4: Batch Generate
 
 ```
-src/tiny_llm/batch.py
+src/tiny_llm_torch/batch.py
 ```
 
 Implement `try_prefill` so that it prefills an entire request at once. Then implement the rest of the code as described in the starter code.
@@ -115,12 +115,12 @@ Implement `try_prefill` so that it prefills an entire request at once. Then impl
 ## Task 5: Chunked Prefill
 
 ```
-src/tiny_llm/batch.py
+src/tiny_llm_torch/batch.py
 ```
 
 Modify `try_prefill` so that it performs prefilling in chunks, rather than all at once.
 
-Note that you should materialize KV cache between chunks. Because MLX uses lazy evaluation, and chunked prefill keeps extending the KV cache across multiple model calls. If you never call `mx.eval`, the cache becomes a longer and longer lazy expression, so memory usage keeps growing. Calling `mx.eval` on the key and value tensors after each chunk materializes the current KV cache and truncates the graph.
+In the original MLX version, chunked prefill needs an explicit materialization step between chunks because MLX uses lazy evaluation. In this Torch/CUDA version, eager execution means you can update the KV cache chunk by chunk directly without adding an extra `mx.eval(...)`-style step.
 
 You can test your implementation by running:
 

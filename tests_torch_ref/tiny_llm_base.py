@@ -1,4 +1,5 @@
 from tiny_llm_torch_ref import (
+    BatchingKvCache,
     Embedding,
     QuantizedWeights,
     Qwen2MLP,
@@ -23,6 +24,7 @@ from tiny_llm_torch_ref import (
 )
 
 __all__ = [
+    "BatchingKvCache",
     "Embedding",
     "QuantizedWeights",
     "Qwen2MLP",

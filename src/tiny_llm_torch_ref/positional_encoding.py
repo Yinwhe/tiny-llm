@@ -56,7 +56,25 @@ class RoPE:
             cos = self.cos[:, offset]
             sin = self.sin[:, offset]
         else:
-            raise NotImplementedError
+            assert len(offset) == N, f"offsets must have length {N}"
+            positions = []
+            for current_offset in offset:
+                assert current_offset.start is not None
+                assert current_offset.stop is not None
+                assert current_offset.stop - current_offset.start == L, (
+                    f"offset must be of length {L}"
+                )
+                positions.append(
+                    torch.arange(
+                        current_offset.start,
+                        current_offset.stop,
+                        device=self.device,
+                        dtype=torch.long,
+                    )
+                )
+            positions = torch.stack(positions, dim=0)
+            cos = self.cos[0, positions]
+            sin = self.sin[0, positions]
 
         if self.traditional:
             x = x.reshape(N, L, H, self.half_dims, 2)

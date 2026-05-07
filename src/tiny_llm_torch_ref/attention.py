@@ -101,7 +101,9 @@ def scaled_dot_product_attention_grouped(
         mask = causal_mask(L, S, scores.dtype, scores.device)
         scores = scores + mask
     elif isinstance(mask, torch.Tensor):
-        scores = scores + mask.reshape(*batch_shape, H, repeats, L, S)
+        mask = torch.broadcast_to(mask, (*batch_shape, H_q, L, S))
+        mask = mask.reshape(*batch_shape, H, repeats, L, S)
+        scores = scores + mask
     elif mask is not None:
         raise NotImplementedError
 
