@@ -1,8 +1,6 @@
 # Setting Up the CUDA Environment
 
-To follow along this CUDA branch, you will need a Linux or WSL2 environment with an NVIDIA GPU. We manage the codebase with pdm.
-
-This branch is being migrated from the original MLX course. The CUDA implementation is not complete yet, so some commands are marked as TODO.
+To follow this course, you will need a Linux or WSL2 environment with an NVIDIA GPU. We manage the codebase with pdm.
 
 ## Install pdm
 
@@ -27,17 +25,12 @@ cd tiny-llm
 The repository is organized as follows:
 
 ```
-src/tiny_llm -- original learner skeleton from the MLX course
-src/tiny_llm_torch -- your Torch/CUDA learner implementation
-src/tiny_llm_ref -- reference implementation from the original MLX course
-src/tiny_llm_torch_ref -- migrated Torch/CUDA reference implementation
+src/tiny_llm -- your Torch/CUDA learner implementation
+src/tiny_llm_ref -- Torch/CUDA reference implementation
 tests/ -- unit tests for your implementation
-tests_refsol/ -- original MLX reference tests kept during migration
-tests_torch_ref/ -- Torch/CUDA tests for migrated chapters
+tests_refsol/ -- Torch/CUDA reference tests
 book/ -- the book
 ```
-
-We keep the original MLX reference implementation while the Torch/CUDA version is built out.
 
 ## Install Dependencies
 
@@ -59,8 +52,6 @@ Install the remaining Python dependencies:
 ```bash
 python -m pip install transformers accelerate safetensors tokenizers sentencepiece huggingface-hub numpy pytest pytest-benchmark ruff torchao torchtune
 ```
-
-The current `pyproject.toml` still contains MLX dependencies from the original project. We will split the CUDA dependencies later.
 
 ## Check the Installation
 
@@ -91,11 +82,11 @@ To run the Torch/CUDA reference tests directly:
 pdm run test-refsol --week 1 --day 1
 ```
 
-The `pdm run test` command copies the corresponding file from `tests_torch_ref/` into `tests/` and runs it against `src/tiny_llm_torch`.
+The `pdm run test` command copies the corresponding file from `tests_refsol/` into `tests/` and runs it against `src/tiny_llm`.
 
 ## Download the Model Parameters
 
-For the CUDA branch, use the regular Hugging Face model weights instead of the MLX weights.
+Use the Hugging Face model weights for this course.
 
 Follow the guide of [this page](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli) to install the Hugging Face CLI (`hf`).
 
@@ -105,8 +96,6 @@ The model parameters are hosted on Hugging Face. Once you authenticated your CLI
 hf auth login
 hf download Qwen/Qwen2-0.5B-Instruct
 ```
-
-The original MLX course used models such as `Qwen/Qwen2-0.5B-Instruct-MLX`. Those are not the default model weights for this CUDA branch.
 
 ## Run the Model
 
@@ -119,9 +108,9 @@ pdm run main --solution ref --loader week1 --model qwen2-0.5b --device gpu
 Run your own implementation once you have completed the corresponding chapter:
 
 ```bash
-pdm run main --solution tiny_llm_torch --loader week1 --model qwen2-0.5b --device gpu
+pdm run main --solution tiny_llm --loader week1 --model qwen2-0.5b --device gpu
 ```
 
-In week 2, we will write some kernels in C++/CUDA. The original course used C++/Metal for MLX; this CUDA branch will replace that path with CUDA-oriented tooling.
+In week 2, we will write some kernels in C++/CUDA.
 
 {{#include copyright.md}}

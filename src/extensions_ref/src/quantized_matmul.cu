@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-namespace tiny_llm_ext_torch_ref {
+namespace tiny_llm_ext_ref {
 
 namespace {
 
@@ -134,4 +134,4 @@ void quantized_matmul_cuda(const torch::Tensor &scales,
     }
 }
 
-}  // namespace tiny_llm_ext_torch_ref
+}  // namespace tiny_llm_ext_ref

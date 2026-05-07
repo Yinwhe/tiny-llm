@@ -1,99 +1,161 @@
-import mlx.core as mx
-from .basics import softmax, linear
+import math
+from functools import lru_cache
+
+import torch
+
 from extensions_ref import tiny_llm_ext_ref
+
+from .basics import linear, softmax
+
+
+@lru_cache(maxsize=None)
+def _cached_causal_mask(
+    L: int,
+    S: int,
+    device_type: str,
+    device_index: int | None,
+) -> torch.Tensor:
+    device = torch.device(device_type, device_index) if device_index is not None else torch.device(device_type)
+    return causal_mask(L, S, torch.float32, device)
 
 
 def scaled_dot_product_attention_simple(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | None = None,
-) -> mx.array:
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     """
-    A simple implementation of scaled dot product attention. Assuming Q, K, V are of the same shape.
-    Assuming mask is always a float array that you can add to the scores.
+    A simple implementation of scaled dot product attention.
+
+    Shapes:
+    - `query`: [B, H, L, D]
+    - `key`: [B, H, S, D]
+    - `value`: [B, H, S, D]
+    - `mask`: broadcastable to [B, H, L, S]
+    - returns: [B, H, L, D]
     """
-    factor = mx.rsqrt(query.shape[-1]) if scale is None else scale
-    scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
+    factor = 1.0 / math.sqrt(query.shape[-1]) if scale is None else scale
+    scores = torch.matmul(query, key.swapaxes(-2, -1)) * factor
     if mask is not None:
         scores = scores + mask
-    return mx.matmul(softmax(scores, axis=-1), value)
+    return torch.matmul(softmax(scores, axis=-1), value)
 
 
-def causal_mask(L: int, S: int, dtype: mx.Dtype) -> mx.array:
-    mask = mx.tril(mx.ones((L, S)), k=(S - L))
-    mask = mx.where(mask, mx.array(0), mx.array(-mx.inf)).astype(dtype)
-    return mask
+def causal_mask(
+    L: int, S: int, dtype: torch.dtype, device: torch.device
+) -> torch.Tensor:
+    """
+    Create a causal mask for attention scores.
+
+    Shapes:
+    - returns: [L, S]
+    """
+    mask = torch.tril(
+        torch.ones((L, S), device=device, dtype=torch.bool),
+        diagonal=S - L,
+    )
+    return torch.where(mask, 0.0, -torch.inf).to(dtype=dtype)
 
 
 def scaled_dot_product_attention_grouped(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | str | None = None,
-) -> mx.array:
+    mask: torch.Tensor | str | None = None,
+) -> torch.Tensor:
     """
-    Potential input of the mask:
-    - mx.array that can broadcast to B * H_q * L * S, which needs to be reshaped to match multi-head dimensions
-    - None which will be ignored
+    Grouped-query attention.
+
+    Shapes:
+    - `query`: [B, H_q, L, D]
+    - `key`: [B, H_kv, S, D]
+    - `value`: [B, H_kv, S, D]
+    - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L, S]
+    - returns: [B, H_q, L, D]
     """
-    factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
-    factor = factor.astype(query.dtype)
     expected_shape = query.shape
-
-    H_q, L, D = query.shape[-3:]
+    *batch_shape, H_q, L, D = query.shape
     H, S, _ = key.shape[-3:]
-    B = query.shape[:-3]
-    assert H_q % H == 0
-    n_repeats = H_q // H
 
-    query = query.reshape(*B, -1, H, n_repeats, L, D)
-    key = key.reshape(*B, -1, H, 1, S, D)
-    value = value.reshape(*B, -1, H, 1, S, D)
+    assert H_q % H == 0, "H_q must be divisible by H"
+    repeats = H_q // H
 
-    scores = mx.matmul(query, key.swapaxes(-2, -1)) * factor
-    if mask is not None:
-        if mask == "causal":
-            mask = causal_mask(L, S, scores.dtype)
-            scores = scores + mask
-        else:
-            mask = mx.broadcast_to(mask, (*B, H_q, L, S))
-            mask = mask.reshape(*B, 1, H, n_repeats, L, S)
-            scores = scores + mask
-    result = mx.matmul(softmax(scores, axis=-1), value)
-    return result.reshape(expected_shape)
+    factor = 1.0 / math.sqrt(D) if scale is None else scale
+    if isinstance(factor, torch.Tensor):
+        factor = factor.to(device=query.device, dtype=query.dtype)
+
+    query = query.reshape(*batch_shape, H, repeats, L, D)
+    key = key.reshape(*batch_shape, H, 1, S, D)
+    value = value.reshape(*batch_shape, H, 1, S, D)
+
+    scores = (
+        torch.matmul(
+            query,
+            key.transpose(-2, -1),
+        )
+        * factor
+    )
+    if mask == "causal":
+        mask = causal_mask(L, S, scores.dtype, scores.device)
+        scores = scores + mask
+    elif isinstance(mask, torch.Tensor):
+        mask = torch.broadcast_to(mask, (*batch_shape, H_q, L, S))
+        mask = mask.reshape(*batch_shape, H, repeats, L, S)
+        scores = scores + mask
+    elif mask is not None:
+        raise NotImplementedError
+
+    return torch.matmul(softmax(scores, axis=-1), value).reshape(expected_shape)
 
 
 def flash_attention(
-    query: mx.array,
-    key: mx.array,
-    value: mx.array,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
     scale: float | None = None,
-    mask: mx.array | str | None = None,
-) -> mx.array:
-    factor = mx.rsqrt(query.shape[-1]) if scale is None else mx.array(scale)
-    factor = factor.astype(query.dtype)
+    mask: torch.Tensor | str | None = None,
+) -> torch.Tensor:
+    """
+    Flash attention wrapper around the C++/CUDA extension.
 
-    *B, H_q, L, E = query.shape
+    Shapes:
+    - `query`: [B..., H_q, L, E]
+    - `key`: [B..., H_kv, S, E]
+    - `value`: [B..., H_kv, S, E]
+    - `mask`: `None`, `"causal"`, or tensor broadcastable to [B..., H_q, L, S]
+    - returns: [B..., H_q, L, E]
+    """
+    expected_shape = query.shape
+    *batch_shape, H_q, L, E = query.shape
     _, H, S, _ = key.shape
-    assert H_q % H == 0
-    query = query.reshape(-1, L, E)
-    key = key.reshape(-1, S, E)
-    value = value.reshape(-1, S, E)
-    query = mx.contiguous(query)
-    key = mx.contiguous(key)
-    value = mx.contiguous(value)
-    is_causal = mask == "causal"
+
+    factor = 1.0 / math.sqrt(E) if scale is None else float(scale)
+
+    query = query.reshape(-1, L, E).contiguous()
+    key = key.reshape(-1, S, E).contiguous()
+    value = value.reshape(-1, S, E).contiguous()
+
+    is_causal = isinstance(mask, str) and mask == "causal"
     N = query.shape[0]
+
     if is_causal:
-        mask = mx.broadcast_to(causal_mask(L, S, mx.float32), (*B, H_q, L, S))
+        mask = torch.broadcast_to(
+            _cached_causal_mask(L, S, query.device.type, query.device.index),
+            (*batch_shape, H_q, L, S),
+        )
     elif mask is None:
-        mask = mx.broadcast_to(mx.zeros((L, S), dtype=mx.float32), (*B, H_q, L, S))
+        mask = torch.broadcast_to(
+            torch.zeros((L, S), dtype=torch.float32, device=query.device),
+            (*batch_shape, H_q, L, S),
+        )
     else:
-        mask = mx.broadcast_to(mask, (*B, H_q, L, S))
-    mask = mx.contiguous(mask.reshape(N, L, S)).astype(mx.float32)
+        mask = torch.broadcast_to(mask, (*batch_shape, H_q, L, S))
+
+    mask = mask.reshape(N, L, S).contiguous().to(dtype=torch.float32)
+
     result = tiny_llm_ext_ref.flash_attention(
         query,
         key,
@@ -104,7 +166,7 @@ def flash_attention(
         num_heads=H_q,
         num_kv_heads=H,
     )
-    return mx.contiguous(result.reshape(*B, H_q, L, E))
+    return result.reshape(expected_shape).contiguous()
 
 
 class SimpleMultiHeadAttention:
@@ -112,16 +174,16 @@ class SimpleMultiHeadAttention:
         self,
         hidden_size: int,
         num_heads: int,
-        wq: mx.array,
-        wk: mx.array,
-        wv: mx.array,
-        wo: mx.array,
+        wq: torch.Tensor,
+        wk: torch.Tensor,
+        wv: torch.Tensor,
+        wo: torch.Tensor,
     ):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         assert hidden_size % num_heads == 0
         self.head_dim = hidden_size // num_heads
-        self.scale = mx.rsqrt(self.head_dim)
+        self.scale = 1.0 / math.sqrt(self.head_dim)
         assert wq.shape == (num_heads * self.head_dim, hidden_size)
         assert wk.shape == (num_heads * self.head_dim, hidden_size)
         assert wv.shape == (num_heads * self.head_dim, hidden_size)
@@ -133,27 +195,36 @@ class SimpleMultiHeadAttention:
 
     def __call__(
         self,
-        query: mx.array,
-        key: mx.array,
-        value: mx.array,
-        mask: mx.array | None = None,
-    ) -> mx.array:
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `query`: [B, L, E]
+        - `key`: [B, S, E]
+        - `value`: [B, S, E]
+        - `mask`: broadcastable to [B, H, L, S]
+        - returns: [B, L, E]
+        """
         N, L, _ = query.shape
         assert query.shape == key.shape == value.shape
+
         projection_q = (
             linear(query, self.wq)
             .reshape(N, L, self.num_heads, self.head_dim)
-            .transpose(0, 2, 1, 3)
+            .transpose(1, 2)
         )
         projection_k = (
             linear(key, self.wk)
             .reshape(N, L, self.num_heads, self.head_dim)
-            .transpose(0, 2, 1, 3)
+            .transpose(1, 2)
         )
         projection_v = (
             linear(value, self.wv)
             .reshape(N, L, self.num_heads, self.head_dim)
-            .transpose(0, 2, 1, 3)
+            .transpose(1, 2)
         )
         x = scaled_dot_product_attention_simple(
             projection_q,
@@ -162,5 +233,5 @@ class SimpleMultiHeadAttention:
             scale=self.scale,
             mask=mask,
         )
-        x = x.transpose(0, 2, 1, 3).reshape(N, L, self.hidden_size)
+        x = x.transpose(1, 2).reshape(N, L, self.hidden_size)
         return linear(x, self.wo)

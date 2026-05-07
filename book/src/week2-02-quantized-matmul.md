@@ -78,7 +78,7 @@ $$
 \text{dequantized} = (\text{quantized} - \text{zero}) \times \text{scale}
 $$
 
-The original MLX version described the equivalent `scale + bias` form. In the AWQ checkpoints used by our Torch version, the extension directly consumes per-group `scale` and packed `zero` values instead.
+In the AWQ checkpoints used in this course, the extension directly consumes per-group `scale` and packed `zero` values.
 
 For 4-bit quantization, the quantized values are in the range $[0, 15]$.
 
@@ -218,10 +218,10 @@ Next, implement the `quantized_linear` function, which is a wrapper around `quan
 In this task, we will implement the quantized matmul as a Torch C++ extension. The pattern is still close to the existing `axpby` example in the codebase — read through `axpby.h`, `axpby.cpp`, and the corresponding binding in `bindings.cpp` first as your reference.
 
 ```
-src/extensions_torch/src/tiny_llm_ext.h
-src/extensions_torch/bindings.cpp
-src/extensions_torch/src/quantized_matmul.cpp
-src/extensions_torch/CMakeLists.txt
+src/extensions/src/tiny_llm_ext.h
+src/extensions/bindings.cpp
+src/extensions/src/quantized_matmul.cpp
+src/extensions/CMakeLists.txt
 ```
 
 You need to touch four files, all within the `tiny_llm_ext` namespace:
@@ -244,8 +244,8 @@ pdm run test --week 2 --day 2 -- -k task_2
 ## Task 3: Implement `quantized_matmul` (GPU version)
 
 ```
-src/extensions_torch/src/quantized_matmul.cu
-src/extensions_torch/src/quantized_matmul.cpp
+src/extensions/src/quantized_matmul.cu
+src/extensions/src/quantized_matmul.cpp
 ```
 
 In this task, you will write the CUDA kernel for quantized matmul **and** wire up the `eval_gpu` method to dispatch it. Keep the math exactly the same as Task 2 (CPU); only the execution model changes.
@@ -302,7 +302,7 @@ You can also benchmark throughput and compare your implementation with the refer
 
 ```bash
 pdm bench --solution tiny_llm --loader week2 --model qwen2-0.5b
-pdm bench --solution tiny_llm_torch_ref --loader week2 --model qwen2-0.5b
+pdm bench --solution tiny_llm_ref --loader week2 --model qwen2-0.5b
 ```
 
 {{#include copyright.md}}

@@ -1,30 +1,30 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
+import torch
+
 from .attention import causal_mask
-import mlx.core as mx
 
 
 class TinyKvCache(ABC):
     @abstractmethod
     def update_and_fetch(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
         """
-        Update the key-value cache and fetch the updated key-value cache.
+        Update the key-value cache and fetch the full cached tensors.
 
-        Args:
-            key: The key to update the cache with.
-            value: The value to update the cache with.
-            mask_length: The length of the mask (only used in batching mode)
-            mask: The mask to use (only used in batching mode)
-
-        Returns:
-            A tuple of the updated key-value cache, the updated value, the sequence length, and the mask.
+        Shapes:
+        - `key`: [B, H, L_new, D]
+        - `value`: [B, H, L_new, D]
+        - returns:
+          - `key`: [B, H, L_total, D]
+          - `value`: [B, H, L_total, D]
+          - `offset`: `L_total`
         """
 
 
@@ -32,81 +32,109 @@ class BatchingKvCache(TinyKvCache):
     def __init__(self, max_active_requests: int, max_seq_len: int):
         self.max_active_requests = max_active_requests
         self.max_seq_len = max_seq_len
-        self.kv_caches: list[TinyKvCache] = [None] * max_active_requests
-        self.HD = None
+        self.kv_caches: list[TinyKvCache | None] = [None] * max_active_requests
+        self.hd: tuple[int, int] | None = None
 
     def update_and_fetch(
         self,
-        keys: mx.array,
-        values: mx.array,
+        keys: torch.Tensor,
+        values: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
-        B, H, S, D = keys.shape
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
+        batch_size, num_heads, seq_len, head_dim = keys.shape
         assert keys.shape == values.shape
-        assert S <= self.max_seq_len
-        if self.HD is None:
-            self.HD = (H, D)
+        assert seq_len <= self.max_seq_len
+        if self.hd is None:
+            self.hd = (num_heads, head_dim)
         else:
-            assert self.HD == (H, D), f"expect {self.HD} but got {H, D}"
-        assert B == self.max_active_requests
-        # Step 1: append the result to the cache
-        data = []
-        for b in range(B):
-            if self.kv_caches[b] is None:
+            assert self.hd == (num_heads, head_dim), (
+                f"expect {self.hd} but got {(num_heads, head_dim)}"
+            )
+        assert batch_size == self.max_active_requests
+        assert mask_length is not None, "mask_length must be provided in batching mode"
+
+        data: list[tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]] | None] = []
+        for batch_idx in range(batch_size):
+            request_cache = self.kv_caches[batch_idx]
+            if request_cache is None:
                 data.append(None)
                 continue
-            key, value = keys[b : b + 1], values[b : b + 1]
-            new_key, new_value, seq_len, mask = self.kv_caches[b].update_and_fetch(
-                key, value
+            key = keys[batch_idx : batch_idx + 1]
+            value = values[batch_idx : batch_idx + 1]
+            new_key, new_value, request_seq_len, request_mask = (
+                request_cache.update_and_fetch(key, value)
             )
-            data.append((new_key[0], new_value[0], seq_len, mask))
+            data.append((new_key[0], new_value[0], request_seq_len, request_mask))
 
-        # Step 2: compute seq_len of this batch
-        def get_seq_len(data):
-            if data is None:
+        def get_seq_len(
+            item: tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]] | None,
+        ) -> int:
+            if item is None:
                 return 0
-            _, _, seq_len, _ = data
-            return seq_len
+            return item[2]
 
-        seq_len = max(map(get_seq_len, data))
-        # Step 3: generate masks and a single array of keys and values
-        keys = mx.zeros((self.max_active_requests, H, seq_len, D), dtype=key.dtype)
-        values = mx.zeros((self.max_active_requests, H, seq_len, D), dtype=value.dtype)
-        masks = mx.full(
-            (self.max_active_requests, mask_length, seq_len), -mx.inf, dtype=key.dtype
+        total_seq_len = max(map(get_seq_len, data))
+
+        batched_keys = torch.zeros(
+            (self.max_active_requests, num_heads, total_seq_len, head_dim),
+            dtype=keys.dtype,
+            device=keys.device,
         )
-        for b in range(B):
-            if data[b] is None:
+        batched_values = torch.zeros(
+            (self.max_active_requests, num_heads, total_seq_len, head_dim),
+            dtype=values.dtype,
+            device=values.device,
+        )
+        masks = torch.full(
+            (self.max_active_requests, mask_length, total_seq_len),
+            -torch.inf,
+            dtype=keys.dtype,
+            device=keys.device,
+        )
+
+        for batch_idx in range(batch_size):
+            item = data[batch_idx]
+            if item is None:
                 continue
-            key, value, S, mask = data[b]
-            keys[b, :, seq_len - S : seq_len, :] = key
-            values[b, :, seq_len - S : seq_len, :] = value
-            if mask is None or mask == "causal":
-                masks[b, :, seq_len - S : seq_len] = causal_mask(
-                    mask_length, S, dtype=key.dtype
-                )
-            elif isinstance(mask, mx.array):
-                masks[b, :, seq_len - S : seq_len] = mask
+            key, value, request_seq_len, request_mask = item
+            batched_keys[batch_idx, :, total_seq_len - request_seq_len : total_seq_len, :] = key
+            batched_values[batch_idx, :, total_seq_len - request_seq_len : total_seq_len, :] = value
+            if request_mask is None or request_mask == "causal":
+                masks[
+                    batch_idx, :, total_seq_len - request_seq_len : total_seq_len
+                ] = causal_mask(mask_length, request_seq_len, dtype=keys.dtype, device=keys.device)
+            elif isinstance(request_mask, torch.Tensor):
+                masks[
+                    batch_idx, :, total_seq_len - request_seq_len : total_seq_len
+                ] = request_mask
             else:
                 raise NotImplementedError
-        return keys, values, None, masks.reshape(B, 1, mask_length, seq_len)
+
+        return (
+            batched_keys,
+            batched_values,
+            None,
+            masks.reshape(batch_size, 1, mask_length, total_seq_len),
+        )
 
     def add_request(self, prefilled: TinyKvCache, id: int):
         if id >= self.max_active_requests:
             raise ValueError(f"Request id {id} is out of range")
         if getattr(prefilled, "key_values", None) is not None:
             keys, _ = prefilled.key_values
-            B, H, _, D = keys.shape
-            assert B == 1
-            if self.HD is None:
-                self.HD = (H, D)
+            batch_size, num_heads, _, head_dim = keys.shape
+            assert batch_size == 1
+            if self.hd is None:
+                self.hd = (num_heads, head_dim)
             else:
-                assert self.HD == (H, D)
+                assert self.hd == (num_heads, head_dim)
         self.kv_caches[id] = prefilled
 
     def remove_request(self, id: int):
-        if self.kv_caches is None:
+        if id >= self.max_active_requests:
+            raise ValueError(f"Request id {id} is out of range")
+        if self.kv_caches[id] is None:
             raise ValueError(f"Request id {id} is not in the cache")
         self.kv_caches[id] = None
 
@@ -118,27 +146,47 @@ class TinyKvFullCache(TinyKvCache):
 
     def update_and_fetch(
         self,
-        key: mx.array,
-        value: mx.array,
+        key: torch.Tensor,
+        value: torch.Tensor,
         mask_length: int | None = None,
-        mask: mx.array | str | None = None,
-    ) -> tuple[mx.array, mx.array, int, Optional[mx.array]]:
+        mask: torch.Tensor | str | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, int, Optional[torch.Tensor]]:
+        """
+        Shapes:
+        - `key`: [B, H, L_new, D]
+        - `value`: [B, H, L_new, D]
+        - returns:
+          - `key`: [B, H, L_total, D]
+          - `value`: [B, H, L_total, D]
+          - `offset`: `L_total`
+        """
         if self.key_values is None:
             assert self.offset == 0
+            assert key.shape == value.shape
             self.key_values = (key, value)
-            B, H, S, D = key.shape
-            self.offset = S
+            _, _, seq_len, _ = key.shape
+            self.offset = seq_len
             return key, value, self.offset, mask
         else:
-            B, H, S, D = key.shape
+            batch_size, num_heads, seq_len, head_dim = key.shape
             assert key.shape == value.shape
             prev_keys, prev_values = self.key_values
-            assert prev_keys.shape == (B, H, self.offset, D)
-            assert prev_values.shape == (B, H, self.offset, D)
-            new_keys = mx.concat([prev_keys, key], axis=2)
-            new_values = mx.concat([prev_values, value], axis=2)
+            assert prev_keys.shape == (
+                batch_size,
+                num_heads,
+                self.offset,
+                head_dim,
+            )
+            assert prev_values.shape == (
+                batch_size,
+                num_heads,
+                self.offset,
+                head_dim,
+            )
+            new_keys = torch.cat([prev_keys, key], dim=2)
+            new_values = torch.cat([prev_values, value], dim=2)
             self.key_values = (new_keys, new_values)
-            self.offset += S
+            self.offset += seq_len
             return new_keys, new_values, self.offset, mask
 
     def rewind(self, n: int):

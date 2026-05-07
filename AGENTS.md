@@ -12,7 +12,7 @@
 
 ## Environment Requirements
 
-- macOS on Apple Silicon is expected by the project.
+- This Torch/CUDA fork expects Linux or WSL2 with an NVIDIA GPU.
 - Install dependencies first:
 
 ```bash

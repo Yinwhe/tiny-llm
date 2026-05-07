@@ -1,25 +1,35 @@
-import mlx.core as mx
-import copy
+import torch
 
 
-def make_sampler(temp: float, top_p: float, top_k: int | None):
-    def sample(logprobs: mx.array):
+def make_sampler(temp: float, top_p: float | None, top_k: int | None):
+    def sample(logprobs: torch.Tensor):
+        """
+        Shapes:
+        - `logprobs`: [B, V]
+        - returns: [B]
+        """
         if temp == 0:
-            return mx.argmax(logprobs, axis=-1)
-        logprobs = copy.copy(logprobs)  # TODO: do we really need a copy?
+            return torch.argmax(logprobs, dim=-1)
+
+        logprobs = logprobs.clone()
+
         if top_k is not None and top_k > 0:
-            mask_elements = mx.argpartition(-logprobs, kth=top_k - 1, axis=-1)[
-                :, top_k:
-            ]
-            logprobs[:, mask_elements] = -mx.inf
+            sorted_idx = torch.argsort(-logprobs, dim=-1)
+            mask_elements = sorted_idx[:, top_k:]
+            logprobs.scatter_(-1, mask_elements, -torch.inf)
+
         if top_p is not None and top_p > 0:
-            sorted_idx = mx.argsort(-logprobs, axis=-1)
-            sorted_logprobs = logprobs[:, sorted_idx]
-            cumsum = mx.cumsum(mx.exp(sorted_logprobs), axis=-1)
-            mask_elements = cumsum < top_p
-            mask_elements[..., 0] = True
-            logprobs[:, sorted_idx] = mx.where(mask_elements, sorted_logprobs, -mx.inf)
-        logprobs = logprobs / temp
-        return mx.random.categorical(logprobs, axis=-1)
+            sorted_idx = torch.argsort(-logprobs, dim=-1)
+            sorted_logprobs = torch.take_along_dim(logprobs, sorted_idx, dim=-1)
+            cumsum = torch.cumsum(torch.exp(sorted_logprobs), dim=-1)
+            keep_sorted = cumsum < top_p
+            keep_sorted[..., 0] = True
+            logprobs.scatter_(
+                -1,
+                sorted_idx,
+                torch.where(keep_sorted, sorted_logprobs, -torch.inf),
+            )
+
+        return torch.distributions.Categorical(logits=logprobs / temp).sample()
 
     return sample

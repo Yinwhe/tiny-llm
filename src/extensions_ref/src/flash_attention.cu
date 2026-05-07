@@ -7,7 +7,7 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace tiny_llm_ext_torch_ref {
+namespace tiny_llm_ext_ref {
 
 namespace {
 
@@ -180,4 +180,4 @@ void flash_attention_cuda(const torch::Tensor &q,
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-}  // namespace tiny_llm_ext_torch_ref
+}  // namespace tiny_llm_ext_ref

@@ -1,12 +1,9 @@
-import mlx.core as mx
-from .basics import linear, silu
-from .attention import scaled_dot_product_attention_grouped
-from .layer_norm import RMSNorm
-from .positional_encoding import RoPE
 from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights
+
+import torch
+
 from .kv_cache import TinyKvCache
+from .quantize import QuantizedWeights
 
 
 class Qwen2MultiHeadAttention:
@@ -15,13 +12,13 @@ class Qwen2MultiHeadAttention:
         hidden_size: int,
         num_heads: int,
         num_kv_heads: int,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -30,11 +27,18 @@ class Qwen2MultiHeadAttention:
 
     def __call__(
         self,
-        x: mx.array,
-        offsets: list[int],
+        x: torch.Tensor,
+        offsets: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L_new, E]
+        - `offsets`: one start position per batch item, or a scalar shared by all
+        - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L_new, L_total]
+        - returns: [B, L_new, E]
+        """
         pass
 
 
@@ -43,13 +47,18 @@ class Qwen2MLP:
         self,
         dim: int,
         hidden_dim: int,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
     ):
         pass
 
-    def __call__(self, x: mx.array) -> mx.array:
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L, E]
+        - returns: [B, L, E]
+        """
         pass
 
 
@@ -61,18 +70,18 @@ class Qwen2TransformerBlock:
         hidden_size: int,
         intermediate_size: int,
         rms_norm_eps: float,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -81,27 +90,38 @@ class Qwen2TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
-        offset: int,
+        x: torch.Tensor,
+        offset: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L_new, E]
+        - `offset`: one start position per batch item, or a scalar shared by all
+        - returns: [B, L_new, E]
+        """
         pass
 
 
 class Qwen2ModelWeek2:
     def __init__(
         self,
-        mlx_model: Any,
+        torch_model: Any,
         enable_flash_attn: bool = False,
     ):
-        self.num_hidden_layers = mlx_model.args.num_hidden_layers
+        self.num_hidden_layers = torch_model.config.num_hidden_layers
         pass
 
     def __call__(
         self,
-        inputs: mx.array,
-        offset: int,
+        inputs: torch.Tensor,
+        offset: int | list[int] | torch.Tensor,
         cache: list[TinyKvCache],
-    ) -> mx.array:
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `inputs`: [B, L_new]
+        - returns logits: [B, L_new, V]
+        """
         pass

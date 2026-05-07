@@ -1,11 +1,20 @@
 import argparse
+import sys
 from dataclasses import dataclass
 from random import Random
 from time import perf_counter
+from pathlib import Path
 
-import mlx.core as mx
-from mlx_lm import load
+import torch
+import transformers.utils as transformers_utils
+import transformers.utils.import_utils as import_utils
+from transformers import AutoModelForCausalLM
 from tqdm.auto import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+import_utils._torchao_available = False
+transformers_utils.is_torchao_available = lambda *args, **kwargs: False
 
 
 @dataclass
@@ -22,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solution", type=str, default="tiny_llm")
     parser.add_argument("--loader", type=str, default="week2", choices=["week1", "week2"])
     parser.add_argument("--enable-flash-attn", action="store_true")
-    parser.add_argument("--device", type=str, default="gpu", choices=["cpu", "gpu"])
+    parser.add_argument("--device", type=str, default="gpu", choices=["gpu"])
     parser.add_argument("--num-seqs", type=int, default=16)
     parser.add_argument("--min-input-len", type=int, default=64)
     parser.add_argument("--max-input-len", type=int, default=256)
@@ -46,6 +55,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--min-output-len cannot be greater than --max-output-len")
     if args.warmup < 0:
         raise ValueError("--warmup must be >= 0")
+    if args.device != "gpu":
+        raise ValueError("Only --device gpu is currently supported")
+    if not torch.cuda.is_available():
+        raise ValueError("CUDA is not available")
 
 
 def load_solution_modules(solution: str):
@@ -100,26 +113,30 @@ def build_requests(
     return requests
 
 
-def sample_next_week1(model, y: mx.array) -> mx.array:
+def sample_next_week1(model, y: torch.Tensor) -> torch.Tensor:
     output_logits = model(y[None, :])
     logits = output_logits[:, -1, :]
-    return mx.argmax(logits, axis=-1)
+    return torch.argmax(logits, dim=-1)
 
 
-def sample_next_week2(model, y: mx.array, offset: int, kv_cache: list) -> mx.array:
+def sample_next_week2(model, y: torch.Tensor, offset: int, kv_cache: list) -> torch.Tensor:
     output_logits = model(y[None, :], offset, kv_cache)
     logits = output_logits[:, -1, :]
-    return mx.argmax(logits, axis=-1)
+    return torch.argmax(logits, dim=-1)
 
 
 def run_one_request_week1(
     model,
     request: BenchRequest,
 ) -> tuple[int, float, float]:
-    context = mx.array(request.prompt_token_ids, dtype=mx.int32)
+    context = torch.tensor(
+        request.prompt_token_ids,
+        dtype=torch.long,
+        device=model.embedding.weight.device,
+    )
     t0 = perf_counter()
     token = sample_next_week1(model, context)
-    mx.eval(token)
+    torch.cuda.synchronize()
     prefill_time = perf_counter() - t0
 
     generated_tokens = 1
@@ -127,9 +144,9 @@ def run_one_request_week1(
 
     for _ in range(request.max_new_tokens - 1):
         t1 = perf_counter()
-        context = mx.concat([context, token])
+        context = torch.cat([context, token])
         token = sample_next_week1(model, context)
-        mx.eval(token)
+        torch.cuda.synchronize()
         decode_time += perf_counter() - t1
         generated_tokens += 1
     return generated_tokens, prefill_time, decode_time
@@ -141,14 +158,18 @@ def run_one_request_week2(
     kv_cache_cls,
 ) -> tuple[int, float, float]:
     kv_cache = [kv_cache_cls() for _ in range(model.num_hidden_layers)]
-    context = mx.array(request.prompt_token_ids, dtype=mx.int32)
+    context = torch.tensor(
+        request.prompt_token_ids,
+        dtype=torch.long,
+        device=model.embedding.weight.device,
+    )
     offset = 0
 
     t0 = perf_counter()
     token = sample_next_week2(model, context, offset, kv_cache)
-    mx.eval(token)
+    torch.cuda.synchronize()
     prefill_time = perf_counter() - t0
-    offset += context.size
+    offset += context.numel()
 
     generated_tokens = 1
     decode_time = 0.0
@@ -156,7 +177,7 @@ def run_one_request_week2(
     for _ in range(request.max_new_tokens - 1):
         t1 = perf_counter()
         token = sample_next_week2(model, token, offset, kv_cache)
-        mx.eval(token)
+        torch.cuda.synchronize()
         decode_time += perf_counter() - t1
         offset += 1
         generated_tokens += 1
@@ -173,89 +194,72 @@ def main() -> None:
 
     rng = Random(args.seed)
     solution_name, models, kv_cache_cls = load_solution_modules(args.solution)
-    model_name = models.shortcut_name_to_full_name(args.model)
+    model_name = models.shortcut_name_to_full_name(args.model, week=1 if args.loader == "week1" else 2)
     print(
-        f"Solution={solution_name} Loader={args.loader} Device={args.device} "
+        f"Solution={solution_name} Loader={args.loader} Device=cuda "
         f"Model={model_name} FlashAttn={args.enable_flash_attn}"
     )
-    mlx_model, tokenizer = load(model_name)
 
-    with mx.stream(mx.gpu if args.device == "gpu" else mx.cpu):
-        if args.loader == "week1":
-            model = models.dispatch_model(model_name, mlx_model, week=1)
+    hf_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        local_files_only=True,
+        torch_dtype=torch.float16,
+        attn_implementation="eager",
+    )
+    hf_model.to("cuda")
+    hf_model.eval()
 
-            def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
-                return run_one_request_week1(
-                    model,
-                    request,
-                )
-        else:
-            model = models.dispatch_model(
-                model_name,
-                mlx_model,
-                week=2,
-                enable_flash_attn=args.enable_flash_attn,
-            )
+    if args.loader == "week1":
+        model = models.dispatch_model(model_name, hf_model, week=1, device="cuda")
 
-            def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
-                return run_one_request_week2(
-                    model,
-                    request,
-                    kv_cache_cls,
-                )
+        def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
+            return run_one_request_week1(model, request)
 
-        requests = build_requests(
-            rng=rng,
-            num_seqs=args.num_seqs,
-            vocab_size=mlx_model.args.vocab_size,
-            eos_token_id=tokenizer.eos_token_id,
-            min_input_len=args.min_input_len,
-            max_input_len=args.max_input_len,
-            min_output_len=args.min_output_len,
-            max_output_len=args.max_output_len,
+    else:
+        model = models.dispatch_model(
+            model_name,
+            hf_model,
+            week=2,
+            device="cuda",
+            enable_flash_attn=args.enable_flash_attn,
         )
 
-        if args.warmup > 0:
-            print(f"Warmup runs: {args.warmup}")
-            warmup_iter = range(args.warmup)
-            warmup_iter = tqdm(
-                warmup_iter,
-                total=args.warmup,
-                desc="Warmup",
-                dynamic_ncols=True,
-                leave=False,
-            )
-            for i in warmup_iter:
-                run_one_request(requests[i % len(requests)])
+        def run_one_request(request: BenchRequest) -> tuple[int, float, float]:
+            return run_one_request_week2(model, request, kv_cache_cls)
 
-        total_prompt_tokens = 0
-        total_generated_tokens = 0
-        total_decode_tokens = 0
-        total_prefill_time = 0.0
-        total_decode_time = 0.0
+    requests = build_requests(
+        rng=rng,
+        num_seqs=args.num_seqs,
+        vocab_size=hf_model.config.vocab_size,
+        eos_token_id=hf_model.config.eos_token_id,
+        min_input_len=args.min_input_len,
+        max_input_len=args.max_input_len,
+        min_output_len=args.min_output_len,
+        max_output_len=args.max_output_len,
+    )
 
-        progress = tqdm(total=len(requests), desc="Bench", dynamic_ncols=True)
+    if args.warmup > 0:
+        print(f"Warmup runs: {args.warmup}")
+        for _ in range(args.warmup):
+            run_one_request(requests[0])
 
-        t0 = perf_counter()
-        for request in requests:
-            generated_tokens, prefill_time, decode_time = run_one_request(request)
-            total_prompt_tokens += len(request.prompt_token_ids)
-            total_generated_tokens += generated_tokens
-            total_decode_tokens += max(0, generated_tokens - 1)
-            total_prefill_time += prefill_time
-            total_decode_time += decode_time
-            elapsed = perf_counter() - t0
-            progress.update(1)
-            progress.set_postfix(
-                {
-                    "out_tok/s": f"{safe_div(total_generated_tokens, elapsed):.1f}",
-                    "decode_tok/s": f"{safe_div(total_decode_tokens, total_decode_time):.1f}",
-                }
-            )
-        total_time = perf_counter() - t0
-        progress.close()
+    total_generated_tokens = 0
+    total_prompt_tokens = 0
+    total_prefill_time = 0.0
+    total_decode_time = 0.0
+
+    t0 = perf_counter()
+    for request in tqdm(requests):
+        generated_tokens, prefill_time, decode_time = run_one_request(request)
+        total_generated_tokens += generated_tokens
+        total_prompt_tokens += len(request.prompt_token_ids)
+        total_prefill_time += prefill_time
+        total_decode_time += decode_time
+    torch.cuda.synchronize()
+    total_time = perf_counter() - t0
 
     total_model_tokens = total_prompt_tokens + total_generated_tokens
+    total_decode_tokens = total_generated_tokens
     print(
         f"Requests: {args.num_seqs}, Prompt tokens: {total_prompt_tokens}, "
         f"Generated tokens: {total_generated_tokens}"

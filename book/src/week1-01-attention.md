@@ -36,7 +36,7 @@ src/tiny_llm/attention.py
 * [PyTorch Scaled Dot Product Attention API](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html) (assume `enable_gqa=False`, assume dim_k=dim_v=dim_q and H_k=H_v=H_q)
 * [Attention is All You Need](https://arxiv.org/abs/1706.03762)
 
-Implement `scaled_dot_product_attention` following the below attention function. The function takes key, value, and query of the same dimensions, and an optional mask matrix `M`.
+Implement `scaled_dot_product_attention_simple` following the below attention function. The function takes key, value, and query of the same dimensions, and an optional mask matrix `M`.
 
 $$
   \text{Attention} = \text{softmax}(\frac{QK^T}{\sqrt{d_k}} + M)V

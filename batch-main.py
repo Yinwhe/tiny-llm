@@ -43,7 +43,7 @@ prompts = [
 
 random.shuffle(prompts)
 
-parser.add_argument("--solution", type=str, default="tiny_llm_torch")
+parser.add_argument("--solution", type=str, default="tiny_llm")
 parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--batch-size", type=int, default=5)
 parser.add_argument("--prefill-step", type=int, default=128)
@@ -51,12 +51,12 @@ parser.add_argument("--enable-flash-attn", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
-if args.solution in {"tiny_llm_torch", "user"}:
-    print("Using your tiny_llm_torch solution")
-    from tiny_llm_torch import batch_generate, load_tokenizer, models
-elif args.solution in {"tiny_llm_torch_ref", "torch_ref", "ref"}:
-    print("Using tiny_llm_torch_ref solution")
-    from tiny_llm_torch_ref import batch_generate, load_tokenizer, models
+if args.solution in {"tiny_llm", "user"}:
+    print("Using your tiny_llm solution")
+    from tiny_llm import batch_generate, load_tokenizer, models
+elif args.solution in {"tiny_llm_ref", "torch_ref", "ref"}:
+    print("Using tiny_llm_ref solution")
+    from tiny_llm_ref import batch_generate, load_tokenizer, models
 else:
     raise ValueError(f"Solution {args.solution} not supported")
 

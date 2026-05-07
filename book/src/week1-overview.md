@@ -8,8 +8,6 @@ We will use the Qwen2-7B-Instruct-AWQ model for this week. As we need to dequant
 model of around 4GB download size needs much more memory after loading. If you do not have enough memory, you can consider
 using the smaller 0.5B model.
 
-In this CUDA branch, we use the Hugging Face Qwen2 AWQ checkpoints rather than the MLX-specific model packages.
-
 ## What We will Cover
 
 * Attention, Multi-Head Attention, and Grouped/Multi Query Attention
@@ -43,8 +41,8 @@ You can try the Qwen2 model with Transformers/vLLM. You can read the blog post b
 within this course. At the end of this week, we will be able to chat with the model -- that is to say, use Qwen2 to
 generate text, as a causal language model.
 
-The reference implementation of the Qwen2 model can be found in Hugging Face Transformers, vLLM, and the original MLX course reference implementation. You may
-utilize these resources to better understand the internals of the model and what we will implement in this week.
+The reference implementation of the Qwen2 model can be found in Hugging Face Transformers and vLLM. You may utilize these
+resources to better understand the internals of the model and what we will implement in this week.
 
 **📚 Readings**
 

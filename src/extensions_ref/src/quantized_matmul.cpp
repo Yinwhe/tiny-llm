@@ -1,312 +1,262 @@
-#include <cstdint>
+#include <ATen/ops/tensor.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/types.h>
 
-#include "mlx/array.h"
-#include "mlx/device.h"
-#include "mlx/dtype.h"
-#include "mlx/backend/common/utils.h"
-#include "mlx/backend/cpu/encoder.h"
-#include "mlx/utils.h"
 #include "tiny_llm_ext.h"
 
-#ifdef _METAL_
-#include "mlx/backend/metal/device.h"
-#endif
+#include <cstdint>
+#include <string>
+#include <stdexcept>
 
 namespace tiny_llm_ext_ref {
 
-mx::array quantized_matmul(const mx::array &scales,         // Input array scales
-                           const mx::array &biases,         // Input array biases
-                           const int group_size,            // Group size
-                           const int bits,                  // Number of bits
-                           const mx::array &a,              // Input array a (not quantized)
-                           const mx::array &b,              // Input array b (quantized)
-                           const bool transpose_b,          // Whether to transpose b
-                           mx::StreamOrDevice s /* = {} */  // Stream on which to schedule the operation
+torch::Tensor quantized_matmul(const torch::Tensor &scales,  // Per-group scaling factors
+                               const torch::Tensor &zeros,   // Per-group zero points / packed offsets
+                               const int group_size,         // Group size
+                               const int bits,               // Number of bits
+                               const torch::Tensor &a,       // Input activation tensor
+                               const torch::Tensor &b,       // Packed quantized weight tensor
+                               const bool transpose_b        // Whether to transpose b
 ) {
-    if (scales.dtype() != mx::float16 && scales.dtype() != mx::bfloat16 && scales.dtype() != mx::float32) {
-        throw std::runtime_error("quantized_matmul: scales must be float16 or bfloat16 or float32");
-    }
-    if (scales.dtype() != biases.dtype()) {
-        throw std::runtime_error("quantized_matmul: scales and biases must be the same dtype");
-    }
-    if (b.dtype() != mx::uint32) {
-        throw std::runtime_error("quantized_matmul: b must be uint32");
-    }
-    if (a.dtype() != scales.dtype()) {
-        throw std::runtime_error("quantized_matmul: a must be the same dtype as scales");
-    }
-    if (a.shape().size() != 2) {
-        throw std::runtime_error("quantized_matmul: a must be a 2D array");
-    }
-    if (b.shape().size() != 2) {
-        throw std::runtime_error("quantized_matmul: b must be a 2D array");
-    }
+    // This reference implementation currently supports AWQ-style int4
+    // weights, with `b` stored in transposed packed form.
     if (bits != 4) {
         throw std::runtime_error("quantized_matmul: bits must be 4");
     }
-    if (group_size != 64) {
-        throw std::runtime_error("quantized_matmul: group_size must be 64");
+    if (group_size <= 0) {
+        throw std::runtime_error("quantized_matmul: group_size must be positive");
     }
-    auto out_shape = a.shape();
-    if (out_shape.size() != 2) {
-        throw std::runtime_error("quantized_matmul: a must be a 2D array");
-    }
-    out_shape[1] = b.shape()[0];
     if (!transpose_b) {
         throw std::runtime_error("quantized_matmul: b must be transposed");
     }
 
-    if (scales.shape() != biases.shape()) {
-        throw std::runtime_error("quantized_matmul: scales and biases must have the same shape");
-    }
-    if (b.shape()[0] != scales.shape()[0]) {
-        throw std::runtime_error("quantized_matmul: b must have the same number of rows as scales");
-    }
-    if (b.shape()[1] != scales.shape()[1] * group_size / 8) {
-        throw std::runtime_error("quantized_matmul: a must have the same number of columns as scales");
-    }
-    if (a.shape()[1] != b.shape()[1] * 8) {
-        throw std::runtime_error("quantized_matmul: a must have the same number of columns as b");
+    if (scales.device() != a.device() || a.device() != b.device() || b.device() != zeros.device()) {
+        throw std::runtime_error("quantized_matmul: scales, a, b and zeros must be in the same device");
     }
 
-    return mx::array(
-        /* const mx::Shape& shape = */ out_shape,
-        /* mx::Dtype dtype = */ a.dtype(),
-        /* std::shared_ptr<mx::Primitive> primitive = */
-        std::make_shared<QuantizedMatmul>(to_stream(s), group_size, bits),
-        /* const std::vector<mx::array>& inputs = */ {scales, biases, a, b});
-}
-
-void quantized_matmul_impl(const mx::array &scales, const mx::array &biases, const mx::array &a, const mx::array &b,
-                           mx::array &out, int group_size, int bits, mx::Stream stream) {
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(scales);
-    encoder.set_input_array(biases);
-    encoder.set_input_array(a);
-    encoder.set_input_array(b);
-    encoder.set_output_array(out);
-
-    if (!a.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: a must be contiguous");
+    if (scales.dtype() != torch::kFloat16 && scales.dtype() != torch::kBFloat16 && scales.dtype() != torch::kFloat32) {
+        throw std::runtime_error("quantized_matmul: scales must be float16 or bfloat16 or float32");
     }
-    if (!b.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: b must be contiguous");
+    if (a.dtype() != scales.dtype()) {
+        throw std::runtime_error("quantized_matmul: a must be the same dtype as scales");
     }
 
-    // Launch the CPU kernel, TODO: support bfloat16
-    encoder.dispatch([out_ptr = out.data<float16_t>(), out_shape = out.shape(), out_strides = out.strides(),
-                      a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
-                      scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
-        int M = a.shape()[0];
-        int N = a.shape()[1];
-        int K = b.shape()[0];
-        const int group_size = 64;
-        const int bits = 4;
-        const int group_per_row = N / group_size;
-        const float16_t *a_ptr = a.data<float16_t>();
-        const uint32_t *b_ptr = b.data<uint32_t>();
-        const float16_t *scales_ptr = scales.data<float16_t>();
-        const float16_t *biases_ptr = biases.data<float16_t>();
-        uint32_t item_mask = (1 << bits) - 1;
-        for (int i = 0; i < M; i++) {
-            for (int k = 0; k < K; k++) {
-                float sum = 0;
-                for (int group_idx = 0; group_idx < group_per_row; group_idx++) {
-                    int64_t scales_loc =
-                        mx::elem_to_loc(k * group_per_row + group_idx, scales.shape(), scales.strides());
-                    int64_t biases_loc =
-                        mx::elem_to_loc(k * group_per_row + group_idx, biases.shape(), biases.strides());
-                    float16_t scale = scales_ptr[scales_loc];
-                    float16_t bias = biases_ptr[biases_loc];
-                    int64_t b_loc = mx::elem_to_loc((k * N + group_idx * group_size) / 8, b.shape(), b.strides());
-                    int64_t a_loc = mx::elem_to_loc(i * N + group_idx * group_size, a.shape(), a.strides());
-                    const int packs_per_item = 32 / bits;
-                    for (int item_idx = 0; item_idx < group_size; item_idx += packs_per_item) {
-                        uint32_t b_val = b_ptr[b_loc];
-                        uint8_t *b_bytes = reinterpret_cast<uint8_t *>(&b_val);
-                        for (int pack_idx = 0; pack_idx < packs_per_item; pack_idx++) {
-                            uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & item_mask;
-                            float b = static_cast<float>(item_val) * scale + bias;
-                            float a = a_ptr[a_loc];
-                            sum += a * b;
-                            a_loc += 1;
-                        }
-                        b_loc += 1;
-                    }
-                }
-                int64_t out_loc = mx::elem_to_loc(i * K + k, out_shape, out_strides);
-                out_ptr[out_loc] = static_cast<float16_t>(sum);
-            }
-        }
-    });
-}
-
-template<typename T>
-void quantized_matmul_impl_typed(
-    const mx::array &scales, const mx::array &biases,
-    const mx::array &a, const mx::array &b,
-    mx::array &out, int group_size, int bits, mx::Stream stream) {
-
-    out.set_data(mx::allocator::malloc(out.nbytes()));
-    auto &encoder = mx::cpu::get_command_encoder(stream);
-    encoder.set_input_array(scales);
-    encoder.set_input_array(biases);
-    encoder.set_input_array(a);
-    encoder.set_input_array(b);
-    encoder.set_output_array(out);
-
-    encoder.dispatch([out_ptr = out.data<T>(), out_shape = out.shape(), out_strides = out.strides(),
-        group_size = group_size, bits = bits,
-        a = mx::array::unsafe_weak_copy(a), b = mx::array::unsafe_weak_copy(b),
-        scales = mx::array::unsafe_weak_copy(scales), biases = mx::array::unsafe_weak_copy(biases)]() {
-
-        // each `group_size` continuous weighted elements are packed into a group and each weight is quantized into `bits` bits
-        // thus each `group_size` continuous weighted elements takes `group_size * bits / 32` uint32_t elements in b
-        // when decoding the group of weights, the scales and biases are repeated for `group_size` times (shared by all elements in the group)
-        int m = a.shape()[0], n = a.shape()[1], k = b.shape()[0];
-        
-        // row => group => item => pack
-        const int group_per_row = n / group_size;   // b[k, :] = [ group_0, group_1, ..., group_(group_per_row-1) ]
-        const int packs_per_item = 32 / bits;   // each uint32_t element can store `packs_per_item` packed elements
-        const int items_per_group = group_size / packs_per_item;   // each group contains `items_per_group` uint32_t elements
-
-        const T *a_ptr = a.data<T>(),
-                *scales_ptr = scales.data<T>(), *biases_ptr = biases.data<T>();
-        const uint32_t *b_ptr = b.data<uint32_t>();
-
-        uint32_t pack_mask = (1 << bits) - 1;
-
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < k; j++) {
-                float sum = 0;
-                for (int group_idx = 0; group_idx < group_per_row; group_idx++) {
-                    int64_t scales_idx = mx::elem_to_loc(j * group_per_row + group_idx, scales.shape(), scales.strides());
-                    int64_t biases_idx = mx::elem_to_loc(j * group_per_row + group_idx, biases.shape(), biases.strides());
-                    T scale = scales_ptr[scales_idx], bias = biases_ptr[biases_idx];
-
-                    int64_t a_idx = mx::elem_to_loc(i * n + group_idx * group_size, a.shape(), a.strides());
-                    int64_t b_idx = mx::elem_to_loc((j * n + group_idx * group_size) / packs_per_item, b.shape(), b.strides());
-
-                    for (int item_idx = 0; item_idx < items_per_group; item_idx++) {
-                        uint32_t b_val = b_ptr[b_idx];   // fetch one uint32_t element in current group (item), so we use type uint32_t to store it
-                        uint8_t *b_bytes = reinterpret_cast<uint8_t *>(&b_val); // reinterpret the uint32_t element as a byte array (32 = one byte * 4)
-
-                        for (int pack_idx = 0; pack_idx < packs_per_item; pack_idx++) {
-                            // extract the pack(4 bits) from the byte array
-                            // pack_idx / 2 is the index of the byte array, and (pack_idx % 2) * bits is the shift amount
-                            // when pack_idx is even, extract the low 4 bits, otherwise extract the high 4 bits
-                            // (pack_7, pack_6, pack_5, pack_4, pack_3, pack_2, pack_1, pack_0) => (b_bytes[3], b_bytes[2], b_bytes[1], b_bytes[0])
-                            uint8_t item_val = (b_bytes[pack_idx / 2] >> ((pack_idx % 2) * bits)) & pack_mask;
-                            float a_val = static_cast<float>(a_ptr[a_idx]);
-                            float b_val_real = static_cast<float>(item_val) * static_cast<float>(scale) + static_cast<float>(bias);
-                            sum += a_val * b_val_real;
-                            a_idx += 1;
-                        }
-                        b_idx += 1;
-                    }
-                }
-                int64_t out_idx = mx::elem_to_loc(i * k + j, out_shape, out_strides);
-                out_ptr[out_idx] = static_cast<T>(sum);
-            }
-        }
-    });
-}
-
-void QuantizedMatmul::eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    auto &scales = inputs[0];
-    auto &biases = inputs[1];
-    auto &a = inputs[2];
-    auto &b = inputs[3];
-    auto &out = outputs[0];
-
-    // quantized_matmul_impl(scales, biases, a, b, out, group_size_, bits_, stream());
-    switch (a.dtype()) {
-        case mx::float16:
-            quantized_matmul_impl_typed<float16_t>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        case mx::float32:
-            quantized_matmul_impl_typed<float>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        case mx::bfloat16:
-            quantized_matmul_impl_typed<mx::bfloat16_t>(scales, biases, a, b, out, group_size_, bits_, stream());
-            break;
-        default:
-            throw std::runtime_error("Unsupported dtype for quantized_matmul");
+    if (zeros.dtype() != torch::kInt32) {
+        throw std::runtime_error("quantized_matmul: zeros must be int32");
     }
-}
+    if (b.dtype() != torch::kInt32) {
+        throw std::runtime_error("quantized_matmul: b must be int32");
+    }
 
-void QuantizedMatmul::eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) {
-    auto &scales = inputs[0];
-    auto &biases = inputs[1];
-    auto &a = inputs[2];
-    auto &b = inputs[3];
-    auto &out = outputs[0];
+    if (scales.dim() != 2) {
+        throw std::runtime_error("quantized_matmul: scales must be a 2D array");
+    }
+    if (zeros.dim() != 2) {
+        throw std::runtime_error("quantized_matmul: zeros must be a 2D array");
+    }
+    if (a.dim() < 2) {
+        throw std::runtime_error("quantized_matmul: a must have at least 2 dimensions");
+    }
+    if (b.dim() != 2) {
+        throw std::runtime_error("quantized_matmul: b must be a 2D array");
+    }
 
-    auto &s = stream();
-    auto &d = mx::metal::device(s.device);
-    out.set_data(mx::allocator::malloc(out.nbytes()));
+    constexpr int64_t packs_per_word = 8;
 
-    // Make a kernel from this metal library
-    auto library = d.get_library("tiny_llm_ext_ref");
-    const char* kernel_name;
-    if (a.dtype() == mx::float16) {
-        kernel_name = "quantized_matmul_w4a16_g64_f16";
-    } else if (a.dtype() == mx::bfloat16) {
-        kernel_name = "quantized_matmul_w4a16_g64_bf16";
+    // a:      [..., N]
+    // b:      [N, K / 8]
+    // scales: [N / group_size, K]
+    // zeros:  [N / group_size, K / 8]
+    const int64_t n = a.size(-1);   // input features
+    const int64_t k = scales.size(1);  // output features
+
+    if (n % group_size != 0) {
+        throw std::runtime_error("quantized_matmul: a.shape()[-1] must be divisible by group_size");
+    }
+    const int64_t num_groups = n / group_size;
+    if (k % packs_per_word != 0) {
+        throw std::runtime_error("quantized_matmul: scales.shape()[1] must be divisible by 8");
+    }
+    const int64_t packed_k = k / packs_per_word;
+
+    if (scales.size(0) != num_groups) {
+        throw std::runtime_error("quantized_matmul: scales.shape()[0] must equal a.shape()[-1] / group_size");
+    }
+    if (zeros.size(0) != num_groups) {
+        throw std::runtime_error("quantized_matmul: zeros.shape()[0] must equal a.shape()[-1] / group_size");
+    }
+    if (zeros.size(1) != packed_k) {
+        throw std::runtime_error("quantized_matmul: zeros.shape()[1] must equal scales.shape()[1] / 8");
+    }
+    if (b.size(0) != n) {
+        throw std::runtime_error("quantized_matmul: b.shape()[0] must equal a.shape()[-1]");
+    }
+    if (b.size(1) != packed_k) {
+        throw std::runtime_error("quantized_matmul: b.shape()[1] must equal scales.shape()[1] / 8");
+    }
+
+    std::vector<int64_t> out_shape(a.sizes().begin(), a.sizes().end());
+    out_shape.back() = k;
+
+    // The low-level kernels operate on 2D matrices, so we flatten the
+    // batch prefix of `a` and reshape the result back afterwards.
+    auto a_2d = a.reshape({-1, n}).contiguous();
+    auto out_2d = torch::empty({a_2d.size(0), k}, torch::TensorOptions().device(a.device()).dtype(a.dtype()));
+
+    QuantizedMatmul op(group_size, bits);
+    std::vector<torch::Tensor> inputs{scales.contiguous(), zeros.contiguous(), a_2d, b.contiguous()};
+    std::vector<torch::Tensor> outputs{out_2d};
+
+    if (a.is_cuda()) {
+        op.eval_gpu(inputs, outputs);
     } else {
-        throw std::runtime_error("quantized_matmul: a must be float16 or bfloat16");
-    }
-    auto kernel = d.get_kernel(kernel_name, library);
-
-    // Prepare to encode kernel
-    auto &compute_encoder = d.get_command_encoder(s.index);
-    compute_encoder.set_compute_pipeline_state(kernel);
-
-    // Encode input arrays to kernel
-    compute_encoder.set_input_array(scales, 0);
-    compute_encoder.set_input_array(biases, 1);
-    compute_encoder.set_input_array(a, 2);
-    compute_encoder.set_input_array(b, 3);
-    // Encode output arrays to kernel
-    compute_encoder.set_output_array(out, 4);
-
-    if (!a.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: a must be contiguous");
-    }
-    if (!b.flags().row_contiguous) {
-        throw std::runtime_error("quantized_matmul: b must be contiguous");
+        op.eval_cpu(inputs, outputs);
     }
 
-    int M = a.shape()[0];
-    int N = a.shape()[1];
-    int K = b.shape()[0];
+    return outputs[0].reshape(out_shape);
+}
 
-    if (N % group_size_ != 0) {
-        throw std::runtime_error("quantized_matmul: N must be divisible by group_size");
+namespace {
+
+// AWQ packs 8 logical int4 values into one uint32 using the order
+// [0, 2, 4, 6, 1, 3, 5, 7]. To recover logical slot `j % 8`, use the
+// inverse mapping below before extracting the 4-bit nibble.
+constexpr int64_t AWQ_REVERSE_ORDER[8] = {0, 4, 1, 5, 2, 6, 3, 7};
+
+inline uint8_t unpack_int4(const uint32_t word, const int64_t slot, const uint32_t mask) {
+    return (word >> (slot * 4)) & mask;
+}
+
+inline uint8_t unpack_awq_int4(const uint32_t word, const int64_t logical_slot, const uint32_t mask) {
+    return unpack_int4(word, AWQ_REVERSE_ORDER[logical_slot], mask);
+}
+
+void check_contiguous(const torch::Tensor &tensor, const char *name) {
+    if (!tensor.is_contiguous()) {
+        throw std::runtime_error(std::string("quantized_matmul: ") + name + " must be contiguous");
     }
+}
 
-    // Encode matrix parameters
-    compute_encoder.set_bytes(M, 5);
-    compute_encoder.set_bytes(N, 6);
-    compute_encoder.set_bytes(K, 7);
+template <typename T>
+void quantized_matmul_cpu_impl(const torch::Tensor &scales,
+                               const torch::Tensor &zeros,
+                               const torch::Tensor &a,
+                               const torch::Tensor &b,
+                               torch::Tensor &out,
+                               const int group_size,
+                               const int bits) {
+    const int64_t m = a.size(0);
+    const int64_t n = a.size(1);
+    const int64_t k = out.size(1);
 
-    size_t tgp_size = kernel->maxTotalThreadsPerThreadgroup();
-    const int x_size = 32;
-    const int y_size = tgp_size / x_size;
-    if (tgp_size < x_size * y_size) {
-        throw std::runtime_error("quantized_matmul: tgp_size must be larger than x*y");
+    const int64_t groups_per_row = n / group_size;
+    const int64_t packs_per_word = 32 / bits;
+    const int64_t packed_k = k / packs_per_word;
+
+    const T *a_ptr = a.const_data_ptr<T>();
+    const T *scales_ptr = scales.const_data_ptr<T>();
+    const uint32_t *zeros_ptr = reinterpret_cast<const uint32_t *>(zeros.const_data_ptr<int32_t>());
+    const uint32_t *b_ptr = reinterpret_cast<const uint32_t *>(b.const_data_ptr<int32_t>());
+    T *out_ptr = out.data_ptr<T>();
+
+    const uint32_t pack_mask = (1u << bits) - 1u;
+
+    for (int64_t i = 0; i < m; ++i) {
+        for (int64_t j = 0; j < k; ++j) {
+            float sum = 0.0f;
+            const int64_t packed_col = j / packs_per_word;
+            const int64_t logical_slot = j % packs_per_word;
+
+            for (int64_t group_idx = 0; group_idx < groups_per_row; ++group_idx) {
+                // This group contributes `group_size` consecutive input
+                // features to the dot-product for out[i, j].
+                const float scale = static_cast<float>(scales_ptr[group_idx * k + j]);
+                const uint32_t packed_zero = zeros_ptr[group_idx * packed_k + packed_col];
+                const uint8_t q_zero = unpack_awq_int4(packed_zero, logical_slot, pack_mask);
+
+                for (int64_t group_offset = 0; group_offset < group_size; ++group_offset) {
+                    const int64_t in_col = group_idx * group_size + group_offset;
+
+                    // Logically this is q_weight[in_col, j]. Physically, 8
+                    // output columns share one packed int32 word.
+                    const uint32_t packed_weight = b_ptr[in_col * packed_k + packed_col];
+
+                    const float a_val = static_cast<float>(a_ptr[i * n + in_col]);
+                    const uint8_t q_weight = unpack_awq_int4(packed_weight, logical_slot, pack_mask);
+                    const float weight_val =
+                        (static_cast<float>(q_weight) - static_cast<float>(q_zero)) * scale;
+                    sum += a_val * weight_val;
+                }
+            }
+
+            out_ptr[i * k + j] = static_cast<T>(sum);
+        }
     }
-    MTL::Size num_threadgroups = MTL::Size((M + x_size - 1) / x_size, (K + y_size - 1) / y_size, 1);
-    MTL::Size num_threads_per_group = MTL::Size(x_size, y_size, 1);
+}
 
-    // MTL::Size num_threadgroups = MTL::Size((M * K + tgp_size - 1) / tgp_size, 1, 1);
-    // MTL::Size num_threads_per_group = MTL::Size(tgp_size, 1, 1);
+}  // namespace
 
-    // Launch the grid with the given number of threads divided among
-    // the given threadgroups
-    compute_encoder.dispatch_threadgroups(num_threadgroups, num_threads_per_group);
+void QuantizedMatmul::eval_cpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const {
+    auto &scales = inputs[0];
+    auto &zeros = inputs[1];
+    auto &a = inputs[2];
+    auto &b = inputs[3];
+    auto &out = outputs[0];
+
+    check_contiguous(scales, "scales");
+    check_contiguous(zeros, "zeros");
+    check_contiguous(a, "a");
+    check_contiguous(b, "b");
+
+    if (a.scalar_type() == torch::kFloat16) {
+        quantized_matmul_cpu_impl<c10::Half>(scales, zeros, a, b, out, group_size_, bits_);
+    } else if (a.scalar_type() == torch::kFloat32) {
+        quantized_matmul_cpu_impl<float>(scales, zeros, a, b, out, group_size_, bits_);
+    } else if (a.scalar_type() == torch::kBFloat16) {
+        quantized_matmul_cpu_impl<c10::BFloat16>(scales, zeros, a, b, out, group_size_, bits_);
+    } else {
+        throw std::runtime_error("quantized_matmul: unsupported dtype for CPU implementation");
+    }
+}
+
+void QuantizedMatmul::eval_gpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const {
+    auto &scales = inputs[0];
+    auto &zeros = inputs[1];
+    auto &a = inputs[2];
+    auto &b = inputs[3];
+    auto &out = outputs[0];
+
+    check_contiguous(scales, "scales");
+    check_contiguous(zeros, "zeros");
+    check_contiguous(a, "a");
+    check_contiguous(b, "b");
+
+#ifdef _CUDA_
+    quantized_matmul_cuda(scales, zeros, a, b, out, group_size_, bits_);
+#else
+    (void)scales;
+    (void)zeros;
+    (void)a;
+    (void)b;
+    (void)out;
+    throw std::runtime_error("QuantizedMatmul has no CUDA implementation.");
+#endif
+}
+
+void QuantizedMatmul::print(std::ostream &os) const {
+    os << name() << "(group_size=" << group_size_ << ", bits=" << bits_ << ")";
+}
+
+std::pair<std::vector<torch::Tensor>, std::vector<int64_t>> QuantizedMatmul::vmap(
+    const std::vector<torch::Tensor> &inputs, const std::vector<int64_t> &axes) const {
+    (void)inputs;
+    (void)axes;
+
+    throw std::runtime_error("QuantizedMatmul has no vmap implementation.");
+}
+
+bool QuantizedMatmul::is_equivalent(const QuantizedMatmul &other) const {
+    return group_size_ == other.group_size_ && bits_ == other.bits_;
 }
 
 }  // namespace tiny_llm_ext_ref

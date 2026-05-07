@@ -19,7 +19,7 @@ parser.add_argument(
     type=str,
     default="Give me a short introduction to large language model.",
 )
-parser.add_argument("--solution", type=str, default="tiny_llm_torch")
+parser.add_argument("--solution", type=str, default="tiny_llm")
 parser.add_argument("--loader", type=str, default="week1")
 parser.add_argument("--device", type=str, default="gpu")
 parser.add_argument("--sampler-temp", type=float, default=0)
@@ -29,16 +29,16 @@ parser.add_argument("--enable-thinking", action="store_true")
 
 args = parser.parse_args()
 
-if args.solution in {"tiny_llm_torch", "user"}:
-    from tiny_llm_torch import (
+if args.solution in {"tiny_llm", "user"}:
+    from tiny_llm import (
         load_tokenizer,
         models,
         sampler,
         simple_generate,
         simple_generate_with_kv_cache,
     )
-elif args.solution in {"tiny_llm_torch_ref", "torch_ref", "ref"}:
-    from tiny_llm_torch_ref import (
+elif args.solution in {"tiny_llm_ref", "torch_ref", "ref"}:
+    from tiny_llm_ref import (
         load_tokenizer,
         models,
         sampler,

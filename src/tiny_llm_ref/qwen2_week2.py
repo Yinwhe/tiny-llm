@@ -1,15 +1,25 @@
-import mlx.core as mx
-from .basics import silu
-from .attention import (
-    scaled_dot_product_attention_grouped,
-    flash_attention,
-)
+import math
+from typing import Any
+
+import torch
+
+from .attention import flash_attention, scaled_dot_product_attention_grouped
+from .basics import linear, silu
+from .embedding import Embedding
+from .kv_cache import TinyKvCache
 from .layer_norm import RMSNorm
 from .positional_encoding import RoPE
-from typing import Any
-from .embedding import Embedding
-from .quantize import dequantize_linear, QuantizedWeights, quantized_linear
-from .kv_cache import TinyKvCache
+from .quantize import QuantizedWeights, quantized_linear
+
+
+def apply_linear(
+    x: torch.Tensor,
+    weight: torch.Tensor | QuantizedWeights,
+    bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if isinstance(weight, QuantizedWeights):
+        return quantized_linear(x, weight, bias)
+    return linear(x, weight, bias)
 
 
 class Qwen2MultiHeadAttention:
@@ -18,13 +28,13 @@ class Qwen2MultiHeadAttention:
         hidden_size: int,
         num_heads: int,
         num_kv_heads: int,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
@@ -38,8 +48,9 @@ class Qwen2MultiHeadAttention:
         assert num_heads % num_kv_heads == 0, (
             f"num_heads {num_heads} must be divisible by num_kv_heads {num_kv_heads}"
         )
+
         self.head_dim = hidden_size // num_heads
-        self.scale = mx.rsqrt(self.head_dim)
+        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.wq = wq
         self.wk = wk
         self.wv = wv
@@ -47,57 +58,91 @@ class Qwen2MultiHeadAttention:
         self.bq = bq
         self.bk = bk
         self.bv = bv
-        self.rope = RoPE(self.head_dim, max_seq_len, theta, traditional=False)
         self.use_flash_attention = use_flash_attention
+        self.rope = RoPE(
+            self.head_dim,
+            max_seq_len,
+            theta,
+            traditional=False,
+            device=wq.scales.device if isinstance(wq, QuantizedWeights) else wq.device,
+        )
 
     def __call__(
         self,
-        x: mx.array,
-        offsets: int | list[int] | mx.array,
+        x: torch.Tensor,
+        offsets: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
-        B, L, _ = x.shape
-        projection_q = quantized_linear(x, self.wq, bias=self.bq).reshape(
-            B, L, self.num_heads, self.head_dim
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L_new, E]
+        - `offsets`: one start position per batch item, or a scalar shared by all
+        - `mask`: `None`, `"causal"`, or tensor broadcastable to [B, H_q, L_new, L_total]
+        - returns: [B, L_new, E]
+        """
+        batch_size, seq_len, _ = x.shape
+
+        projection_q = apply_linear(x, self.wq, self.bq).reshape(
+            batch_size, seq_len, self.num_heads, self.head_dim
         )
-        projection_k = quantized_linear(x, self.wk, bias=self.bk).reshape(
-            B, L, self.num_kv_heads, self.head_dim
+        projection_k = apply_linear(x, self.wk, self.bk).reshape(
+            batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
-        projection_v = quantized_linear(x, self.wv, bias=self.bv).reshape(
-            B, L, self.num_kv_heads, self.head_dim
+        projection_v = apply_linear(x, self.wv, self.bv).reshape(
+            batch_size, seq_len, self.num_kv_heads, self.head_dim
         )
-        # todo: move offsets to kv cache
+
         if isinstance(offsets, int):
-            offset_slice = [slice(int(offsets), int(offsets + L))]
+            offset_slices = [slice(int(offsets), int(offsets + seq_len))]
+        elif isinstance(offsets, torch.Tensor):
+            assert offsets.ndim == 1 and offsets.shape[0] == batch_size, (
+                f"offsets must have shape [{batch_size}]"
+            )
+            offset_slices = [
+                slice(int(offset.item()), int(offset.item() + seq_len))
+                for offset in offsets
+            ]
         else:
-            offset_slice = [slice(int(i), int(i + L)) for i in offsets]
-        projection_q = self.rope(projection_q, offset=offset_slice)
-        projection_k = self.rope(projection_k, offset=offset_slice)
-        projection_q = projection_q.transpose(0, 2, 1, 3)
-        projection_k = projection_k.transpose(0, 2, 1, 3)
-        projection_v = projection_v.transpose(0, 2, 1, 3)
+            assert len(offsets) == batch_size, (
+                f"offsets must have length {batch_size}"
+            )
+            offset_slices = [
+                slice(int(offset), int(offset + seq_len)) for offset in offsets
+            ]
+
+        projection_q = self.rope(projection_q, offset=offset_slices)
+        projection_k = self.rope(projection_k, offset=offset_slices)
+        projection_q = projection_q.transpose(1, 2)
+        projection_k = projection_k.transpose(1, 2)
+        projection_v = projection_v.transpose(1, 2)
+
         projection_k, projection_v, _, mask = cache.update_and_fetch(
-            projection_k, projection_v, mask_length=L, mask=mask
+            projection_k,
+            projection_v,
+            mask_length=seq_len,
+            mask=mask,
         )
+
         if self.use_flash_attention:
-            x = flash_attention(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+            output = flash_attention(
+                projection_q.to(dtype=torch.float32),
+                projection_k.to(dtype=torch.float32),
+                projection_v.to(dtype=torch.float32),
                 scale=self.scale,
                 mask=mask,
-            ).astype(x.dtype)
+            ).to(dtype=x.dtype)
         else:
-            x = scaled_dot_product_attention_grouped(
-                projection_q.astype(mx.float32),
-                projection_k.astype(mx.float32),
-                projection_v.astype(mx.float32),
+            output = scaled_dot_product_attention_grouped(
+                projection_q.to(dtype=torch.float32),
+                projection_k.to(dtype=torch.float32),
+                projection_v.to(dtype=torch.float32),
                 scale=self.scale,
                 mask=mask,
-            ).astype(x.dtype)
-        x = x.transpose(0, 2, 1, 3).reshape(B, L, self.hidden_size)
-        return quantized_linear(x, self.wo)
+            ).to(dtype=x.dtype)
+        output = output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_size)
+
+        return apply_linear(output, self.wo)
 
 
 class Qwen2MLP:
@@ -105,9 +150,9 @@ class Qwen2MLP:
         self,
         dim: int,
         hidden_dim: int,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
     ):
         self.dim = dim
         self.hidden_dim = hidden_dim
@@ -115,9 +160,14 @@ class Qwen2MLP:
         self.w_up = w_up
         self.w_down = w_down
 
-    def __call__(self, x: mx.array) -> mx.array:
-        return quantized_linear(
-            silu(quantized_linear(x, self.w_gate)) * quantized_linear(x, self.w_up),
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L, E]
+        - returns: [B, L, E]
+        """
+        return apply_linear(
+            silu(apply_linear(x, self.w_gate)) * apply_linear(x, self.w_up),
             self.w_down,
         )
 
@@ -130,32 +180,35 @@ class Qwen2TransformerBlock:
         hidden_size: int,
         intermediate_size: int,
         rms_norm_eps: float,
-        wq: QuantizedWeights,
-        wk: QuantizedWeights,
-        wv: QuantizedWeights,
-        wo: QuantizedWeights,
-        bq: mx.array,
-        bk: mx.array,
-        bv: mx.array,
-        w_gate: QuantizedWeights,
-        w_up: QuantizedWeights,
-        w_down: QuantizedWeights,
-        w_input_layernorm: mx.array,
-        w_post_attention_layernorm: mx.array,
+        wq: torch.Tensor | QuantizedWeights,
+        wk: torch.Tensor | QuantizedWeights,
+        wv: torch.Tensor | QuantizedWeights,
+        wo: torch.Tensor | QuantizedWeights,
+        bq: torch.Tensor,
+        bk: torch.Tensor,
+        bv: torch.Tensor,
+        w_gate: torch.Tensor | QuantizedWeights,
+        w_up: torch.Tensor | QuantizedWeights,
+        w_down: torch.Tensor | QuantizedWeights,
+        w_input_layernorm: torch.Tensor,
+        w_post_attention_layernorm: torch.Tensor,
         max_seq_len: int = 32768,
         theta: int = 1000000,
         use_flash_attention: bool = False,
     ):
         self.num_attention_heads = num_attention_heads
         self.hidden_size = hidden_size
+        self.use_flash_attention = use_flash_attention
         self.mlp = Qwen2MLP(hidden_size, intermediate_size, w_gate, w_up, w_down)
         self.input_layernorm = RMSNorm(hidden_size, w_input_layernorm, eps=rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(
-            hidden_size, w_post_attention_layernorm, eps=rms_norm_eps
+            hidden_size,
+            w_post_attention_layernorm,
+            eps=rms_norm_eps,
         )
         self.self_attn = Qwen2MultiHeadAttention(
-            num_heads=num_attention_heads,
             hidden_size=hidden_size,
+            num_heads=num_attention_heads,
             num_kv_heads=num_kv_heads,
             wq=wq,
             wk=wk,
@@ -171,109 +224,139 @@ class Qwen2TransformerBlock:
 
     def __call__(
         self,
-        x: mx.array,
-        offset: int | list[int] | mx.array,
+        x: torch.Tensor,
+        offsets: int | list[int] | torch.Tensor,
         cache: TinyKvCache,
-        mask: mx.array | str | None = None,
-    ) -> mx.array:
-        r = self.self_attn(self.input_layernorm(x), offset, cache, mask)
-        h = x + r
-        r = self.mlp(self.post_attention_layernorm(h))
-        out = h + r
-        return out
+        mask: torch.Tensor | str | None = None,
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `x`: [B, L_new, E]
+        - `offsets`: one start position per batch item, or a scalar shared by all
+        - returns: [B, L_new, E]
+        """
+        residual = self.self_attn(self.input_layernorm(x), offsets, cache, mask)
+        hidden = x + residual
+        residual = self.mlp(self.post_attention_layernorm(hidden))
+        return hidden + residual
 
 
 class Qwen2ModelWeek2:
     def __init__(
         self,
-        mlx_model: Any,
+        transformers_model: Any,
+        precision: torch.dtype = torch.float16,
+        device: torch.device | str | None = None,
         enable_flash_attn: bool = False,
     ):
-        self.num_hidden_layers = mlx_model.args.num_hidden_layers
-        self.hidden_size = mlx_model.args.hidden_size
-        self.vocab_size = mlx_model.args.vocab_size
-        precision = mx.float16
+        config = transformers_model.config
+        model = transformers_model.model
+
+        if device is None:
+            device = model.embed_tokens.weight.device
+        device = torch.device(device)
+
+        def cast(weight: torch.Tensor) -> torch.Tensor:
+            return weight.detach().to(device=device, dtype=precision).contiguous()
+
+        def cast_bias(
+            bias: torch.Tensor | None,
+            out_features: int,
+        ) -> torch.Tensor:
+            if bias is None:
+                return torch.zeros(out_features, device=device, dtype=precision)
+            return cast(bias)
+
+        def cast_weight(torch_layer: Any) -> torch.Tensor | QuantizedWeights:
+            required_attrs = ("qweight", "qzeros", "scales", "group_size", "w_bit")
+            if all(hasattr(torch_layer, attr) for attr in required_attrs):
+                return QuantizedWeights(
+                    scales=torch_layer.scales.detach().to(
+                        device=device, dtype=precision
+                    ).contiguous(),
+                    zeros=torch_layer.qzeros.detach().to(
+                        device=device, dtype=torch.int32
+                    ).contiguous(),
+                    group_size=int(torch_layer.group_size),
+                    bits=int(torch_layer.w_bit),
+                    weight=torch_layer.qweight.detach().to(
+                        device=device, dtype=torch.int32
+                    ).contiguous(),
+                )
+            if hasattr(torch_layer, "weight"):
+                return cast(torch_layer.weight)
+            raise RuntimeError("unsupported linear layer type for Qwen2ModelWeek2")
+
+        self.num_hidden_layers = config.num_hidden_layers
+        self.hidden_size = config.hidden_size
+        self.vocab_size = config.vocab_size
         self.precision = precision
 
         self.embedding = Embedding(
             vocab_size=self.vocab_size,
             embedding_dim=self.hidden_size,
-            weight=dequantize_linear(mlx_model.model.embed_tokens).astype(precision),
+            weight=cast(model.embed_tokens.weight),
         )
         self.layers_inner = []
 
-        for i in range(mlx_model.args.num_hidden_layers):
-            wq = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.q_proj
-            )
-            wk = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.k_proj
-            )
-            wv = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.v_proj
-            )
-            wo = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].self_attn.o_proj
-            )
-            w_gate = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.gate_proj
-            )
-            w_up = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.up_proj
-            )
-            w_down = QuantizedWeights.from_mlx_layer(
-                mlx_model.model.layers[i].mlp.down_proj
-            )
+        for index in range(self.num_hidden_layers):
+            transformer_layer = model.layers[index]
+            attention = transformer_layer.self_attn
+            mlp = transformer_layer.mlp
 
             layer = Qwen2TransformerBlock(
-                num_attention_heads=mlx_model.args.num_attention_heads,
-                num_kv_heads=mlx_model.args.num_key_value_heads,
-                hidden_size=mlx_model.args.hidden_size,
-                intermediate_size=mlx_model.args.intermediate_size,
-                rms_norm_eps=mlx_model.args.rms_norm_eps,
-                wq=wq,
-                wk=wk,
-                wv=wv,
-                wo=wo,
-                bq=mlx_model.model.layers[i].self_attn.q_proj.bias.astype(precision),
-                bk=mlx_model.model.layers[i].self_attn.k_proj.bias.astype(precision),
-                bv=mlx_model.model.layers[i].self_attn.v_proj.bias.astype(precision),
-                w_gate=w_gate,
-                w_up=w_up,
-                w_down=w_down,
-                w_input_layernorm=mlx_model.model.layers[
-                    i
-                ].input_layernorm.weight.astype(precision),
-                w_post_attention_layernorm=mlx_model.model.layers[
-                    i
-                ].post_attention_layernorm.weight.astype(precision),
-                max_seq_len=mlx_model.args.max_position_embeddings,
-                theta=mlx_model.args.rope_theta,
+                num_attention_heads=config.num_attention_heads,
+                num_kv_heads=config.num_key_value_heads,
+                hidden_size=config.hidden_size,
+                intermediate_size=config.intermediate_size,
+                rms_norm_eps=config.rms_norm_eps,
+                wq=cast_weight(attention.q_proj),
+                wk=cast_weight(attention.k_proj),
+                wv=cast_weight(attention.v_proj),
+                wo=cast_weight(attention.o_proj),
+                bq=cast_bias(attention.q_proj.bias, attention.q_proj.out_features),
+                bk=cast_bias(attention.k_proj.bias, attention.k_proj.out_features),
+                bv=cast_bias(attention.v_proj.bias, attention.v_proj.out_features),
+                w_gate=cast_weight(mlp.gate_proj),
+                w_up=cast_weight(mlp.up_proj),
+                w_down=cast_weight(mlp.down_proj),
+                w_input_layernorm=cast(transformer_layer.input_layernorm.weight),
+                w_post_attention_layernorm=cast(
+                    transformer_layer.post_attention_layernorm.weight
+                ),
+                max_seq_len=config.max_position_embeddings,
+                theta=config.rope_theta,
                 use_flash_attention=enable_flash_attn,
             )
             self.layers_inner.append(layer)
+
         self.norm = RMSNorm(
-            mlx_model.args.hidden_size,
-            weight=mlx_model.model.norm.weight.astype(precision),
-            eps=mlx_model.args.rms_norm_eps,
+            self.hidden_size,
+            weight=cast(model.norm.weight),
+            eps=config.rms_norm_eps,
         )
-        if not mlx_model.args.tie_word_embeddings:
-            self.w_lm_head = QuantizedWeights.from_mlx_layer(mlx_model.lm_head)
-        else:
+        if config.tie_word_embeddings:
             self.w_lm_head = None
-        self.mlx_model = mlx_model
+        else:
+            self.w_lm_head = cast_weight(transformers_model.lm_head)
 
     def __call__(
         self,
-        inputs: mx.array,
-        offset: int | list[int] | mx.array,
+        inputs: torch.Tensor,
+        offset: int | list[int] | torch.Tensor,
         cache: list[TinyKvCache],
-    ) -> mx.array:
-        h = self.embedding(inputs)
-        for layer in range(self.num_hidden_layers):
-            h = self.layers_inner[layer](h, offset, cache[layer], mask="causal")
-        h = self.norm(h)
+    ) -> torch.Tensor:
+        """
+        Shapes:
+        - `inputs`: [B, L_new]
+        - returns logits: [B, L_new, V]
+        """
+        hidden = self.embedding(inputs)
+        for index in range(self.num_hidden_layers):
+            hidden = self.layers_inner[index](
+                hidden, offset, cache[index], mask="causal"
+            )
+        hidden = self.norm(hidden)
         if self.w_lm_head is not None:
-            return quantized_linear(h, self.w_lm_head)
-        else:
-            return self.embedding.as_linear(h)
+            return apply_linear(hidden, self.w_lm_head)
+        return self.embedding.as_linear(hidden)

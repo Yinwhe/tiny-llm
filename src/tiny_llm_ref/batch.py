@@ -1,25 +1,24 @@
-import mlx.core as mx
-from mlx_lm.tokenizer_utils import TokenizerWrapper
-from .kv_cache import *
-from .qwen2_week2 import Qwen2ModelWeek2
-from typing import Callable
 from datetime import datetime
+from typing import Any
+
+import torch
+
+from .kv_cache import BatchingKvCache, TinyKvFullCache
 
 
-def _step(model, y, offsets, kv_cache):
+def _step(model: Any, y: torch.Tensor, offsets: list[int], kv_cache: Any):
     logits = model(y, offsets, kv_cache)
     logits = logits[:, -1, :]
-    logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-    sampler = lambda x: mx.argmax(x, axis=-1)
-    y = sampler(logprobs)
-    return y
+    logprobs = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+    sampler = lambda x: torch.argmax(x, dim=-1)
+    return sampler(logprobs)
 
 
 class Request:
     def __init__(
         self,
-        model: any,
-        tokenizer: TokenizerWrapper,
+        model: Any,
+        tokenizer: Any,
         prompt: str,
         prefill_max_step: int = 128,
         prompt_idx: int = 0,
@@ -28,8 +27,10 @@ class Request:
         self.kv_cache = [TinyKvFullCache() for _ in range(model.num_hidden_layers)]
         self.model = model
         self.detokenizer = tokenizer.detokenizer.__class__(tokenizer._tokenizer)
-        self.prefill_tokens = mx.array(
-            tokenizer.encode(prompt, add_special_tokens=False)
+        self.prefill_tokens = torch.tensor(
+            tokenizer.encode(prompt, add_special_tokens=False),
+            dtype=torch.long,
+            device=model.embedding.weight.device,
         )
         self.prefill_max_step = prefill_max_step
         self.is_done = False
@@ -41,12 +42,13 @@ class Request:
 
     def try_prefill(self):
         """
-        Prefill this request up to max_step size, returns None if prefill is not done
+        Prefill this request up to `prefill_max_step` tokens.
         """
         if self.is_prefill_done:
             raise ValueError("prefill called after done")
         tokens_to_prefill = min(
-            self.prefill_max_step, self.prefill_tokens.size - self.offset
+            self.prefill_max_step,
+            self.prefill_tokens.numel() - self.offset,
         )
         token = _step(
             self.model,
@@ -55,16 +57,9 @@ class Request:
             self.kv_cache,
         )
         self.offset += tokens_to_prefill
-
-        # Materialize KV cache after each prefill chunk to truncate the lazy
-        # computation graph and prevent memory from growing unboundedly.
-        for i in self.kv_cache:
-            mx.eval(i.key_values[0])
-            mx.eval(i.key_values[1])
-        if self.offset == self.prefill_tokens.size:
+        if self.offset == self.prefill_tokens.numel():
             self.is_prefill_done = True
-            mx.eval(token)
-            self.decode_done(token.item(), False)
+            self.decode_done(token.item(), update_offset=False)
 
     def decode_done(self, token, update_offset=True):
         if self.is_done:
@@ -107,11 +102,12 @@ def _print_progress(
                 flush=True,
             )
             return
-        precentage = (
-            pending_prefill_request.offset / pending_prefill_request.prefill_tokens.size
+        percentage = (
+            pending_prefill_request.offset
+            / pending_prefill_request.prefill_tokens.numel()
         ) * 100
         print(
-            f"{animation_frame} Prefill [req {pending_prefill_request.prompt_idx}]: {precentage:.2f}% ({pending_prefill_request.prefill_tokens.size - pending_prefill_request.offset} remaining tokens)",
+            f"{animation_frame} Prefill [req {pending_prefill_request.prompt_idx}]: {percentage:.2f}% ({pending_prefill_request.prefill_tokens.numel() - pending_prefill_request.offset} remaining tokens)",
             flush=True,
         )
     else:
@@ -119,8 +115,8 @@ def _print_progress(
 
 
 def batch_generate(
-    model: any,
-    tokenizer: TokenizerWrapper,
+    model: Any,
+    tokenizer: Any,
     prompts: list[str],
     max_seq_len=512,
     batch_size=5,
@@ -140,7 +136,6 @@ def batch_generate(
     while True:
         if len(prompts) == 0 and all(req is None for req in decode_requests):
             break
-        # prefill until no idle slots
         if len(prompts) > 0 and pending_prefill_request is None:
             prompt = prompts.pop(0)
             pending_prefill_request = Request(
@@ -148,7 +143,6 @@ def batch_generate(
             )
             next_request_idx += 1
 
-        # In every iteration, we do a prefill first
         if pending_prefill_request is not None:
             made_progress = False
             if not pending_prefill_request.is_prefill_done:
@@ -159,7 +153,6 @@ def batch_generate(
                 found_slot = False
                 for i in range(batch_size):
                     if decode_requests[i] is None:
-                        # Add this request to the decode requests
                         for prefill_cache, batch_cache in zip(
                             prefill_kv_cache, kv_cache
                         ):
@@ -180,7 +173,6 @@ def batch_generate(
                 )
                 progress_cnt += 1
 
-        # After the prefill request moves forward one step, we do the decode
         if any(req is not None for req in decode_requests):
             next_tokens = []
             offsets = []
@@ -191,8 +183,11 @@ def batch_generate(
                 else:
                     next_tokens.append(0)
                     offsets.append(0)
-            next_tokens = mx.array(next_tokens)
-            # decode
+            next_tokens = torch.tensor(
+                next_tokens,
+                device=model.embedding.weight.device,
+                dtype=torch.long,
+            )
             next_tokens = _step(model, next_tokens.reshape(-1, 1), offsets, kv_cache)
             for i in range(batch_size):
                 req = decode_requests[i]

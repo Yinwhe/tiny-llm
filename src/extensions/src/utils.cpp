@@ -1,16 +1,10 @@
 #include "tiny_llm_ext.h"
 
-#ifdef _METAL_
-#include "mlx/backend/metal/device.h"
-#endif
-
 namespace tiny_llm_ext {
 
-void load_library(mx::Device d, const char *path) {
-#ifdef _METAL_
-    auto &md = mx::metal::device(d);
-    md.get_library("tiny_llm_ext", path);
-#endif
+void load_library(const char *device, const char *path) {
+    (void)device;
+    (void)path;
 }
 
 }  // namespace tiny_llm_ext

@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import tiny_llm_torch
-import tiny_llm_torch_ref
+import tiny_llm
+import tiny_llm_ref
 
 
 def export_public_members(module):
@@ -48,26 +48,25 @@ def export_public_members(module):
 def stringify_member(members):
     return [
         f"{member[0]}: {str(member[1])}\n".replace(
-            "tiny_llm_torch_ref.", "tiny_llm_torch."
+            "tiny_llm_ref.", "tiny_llm."
         )
         for member in members
     ]
 
+start_code = stringify_member(export_public_members(tiny_llm))
+ref_sol = stringify_member(export_public_members(tiny_llm_ref))
 
-start_code = stringify_member(export_public_members(tiny_llm_torch))
-ref_sol = stringify_member(export_public_members(tiny_llm_torch_ref))
-
-print("--- tiny_llm_torch/apis.txt ---", flush=True)
+print("--- tiny_llm/apis.txt ---", flush=True)
 sys.stdout.writelines(start_code)
-print("--- tiny_llm_torch_ref/apis.txt ---", flush=True)
+print("--- tiny_llm_ref/apis.txt ---", flush=True)
 sys.stdout.writelines(ref_sol)
 
 result = list(
     difflib.unified_diff(
         start_code,
         ref_sol,
-        fromfile="tiny_llm_torch/apis.txt",
-        tofile="tiny_llm_torch_ref/apis.txt",
+        fromfile="tiny_llm/apis.txt",
+        tofile="tiny_llm_ref/apis.txt",
         n=0,
     )
 )

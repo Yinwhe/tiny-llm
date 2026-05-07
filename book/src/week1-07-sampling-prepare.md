@@ -76,11 +76,11 @@ to make some operations run faster. You will need a working CUDA toolchain and C
     pdm run check-installation
     ```
 
-You can test your installation by compiling the code in `src/extensions_torch`:
+You can test your installation by compiling the code in `src/extensions`:
 
 ```bash
-pdm run build-ext-torch
-pdm run build-ext-torch-ref
+pdm run build-ext
+pdm run build-ext-ref
 ```
 
 Both commands should complete without build errors.

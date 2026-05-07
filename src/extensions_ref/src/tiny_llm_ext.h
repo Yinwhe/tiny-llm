@@ -1,66 +1,90 @@
 #pragma once
 
-#include "mlx/utils.h"
-#include "mlx/primitives.h"
+#include <torch/extension.h>
 
-namespace mx = mlx::core;
+#include <iosfwd>
+#include <utility>
+#include <vector>
 
 namespace tiny_llm_ext_ref {
 
-void load_library(mx::Device d, const char *path);
+void load_library(const char *device, const char *path);
 
-mx::array quantized_matmul(const mx::array &scales,   // Input array scales
-                           const mx::array &biases,   // Input array biases
-                           const int group_size,      // Group size
-                           const int bits,            // Number of bits
-                           const mx::array &a,        // Input array a (not quantized)
-                           const mx::array &b,        // Input array b (quantized)
-                           const bool transpose_b,    // Whether to transpose b
-                           mx::StreamOrDevice s = {}  // Stream on which to schedule the operation
+torch::Tensor quantized_matmul(const torch::Tensor &scales,  // Per-group scaling factors
+                               const torch::Tensor &zeros,   // Per-group zero points / packed offsets
+                               const int group_size,         // Group size
+                               const int bits,               // Number of bits
+                               const torch::Tensor &a,       // Input activation tensor
+                               const torch::Tensor &b,       // Packed quantized weight tensor
+                               const bool transpose_b        // Whether to transpose b
 );
 
-class QuantizedMatmul : public mx::Primitive {
+torch::Tensor flash_attention(const torch::Tensor &q,
+                              const torch::Tensor &k,
+                              const torch::Tensor &v,
+                              const torch::Tensor &mask,
+                              const float scale,
+                              const bool is_causal,
+                              const int num_kv_heads,
+                              const int num_heads);
+
+#ifdef _CUDA_
+void quantized_matmul_cuda(const torch::Tensor &scales,
+                           const torch::Tensor &zeros,
+                           const torch::Tensor &a,
+                           const torch::Tensor &b,
+                           torch::Tensor &out,
+                           const int group_size,
+                           const int bits);
+
+void flash_attention_cuda(const torch::Tensor &q,
+                          const torch::Tensor &k,
+                          const torch::Tensor &v,
+                          const torch::Tensor &mask,
+                          torch::Tensor &out,
+                          const float scale,
+                          const bool is_causal,
+                          const int num_kv_heads,
+                          const int num_heads);
+#endif
+
+class QuantizedMatmul {
 public:
-    explicit QuantizedMatmul(mx::Stream stream, const int group_size, const int bits)
-        : mx::Primitive(stream), group_size_(group_size), bits_(bits) {};
+    explicit QuantizedMatmul(const int group_size, const int bits) : group_size_(group_size), bits_(bits) {};
 
-    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
-    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_cpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const;
+    void eval_gpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const;
 
-    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &inputs,
-                                                             const std::vector<int> &axes) override {
-        throw std::runtime_error("QuantizedMatmul has no vmap implementation.");
-    }
+    std::pair<std::vector<torch::Tensor>, std::vector<int64_t>> vmap(const std::vector<torch::Tensor> &inputs,
+                                                                     const std::vector<int64_t> &axes) const;
 
-    const char *name() const override { return "QuantizedMatmul"; }
+    void print(std::ostream &os) const;
+
+    const char *name() const { return "QuantizedMatmul"; }
+
+    bool is_equivalent(const QuantizedMatmul &other) const;
 
 private:
     int group_size_;
     int bits_;
 };
 
-mx::array flash_attention(const mx::array &q, const mx::array &k, const mx::array &v, const mx::array &mask,
-                          const float scale, const bool is_causal, const int num_kv_heads, const int num_heads,
-                          mx::StreamOrDevice s = {});
-
-mx::array flash_attention_no_mask(const mx::array &q, const mx::array &k, const mx::array &v,
-                                  const float scale, const int num_kv_heads, const int num_heads, mx::StreamOrDevice s = {});
-
-class FlashAttention : public mx::Primitive {
+class FlashAttention {
 public:
-    explicit FlashAttention(mx::Stream stream, const float scale, const bool is_causal, const int num_kv_heads,
-                            const int num_heads)
-        : mx::Primitive(stream), scale_(scale), is_causal_(is_causal), num_kv_heads_(num_kv_heads), num_heads_(num_heads) {};
+    FlashAttention(const float scale, const bool is_causal, const int num_kv_heads, const int num_heads)
+        : scale_(scale), is_causal_(is_causal), num_kv_heads_(num_kv_heads), num_heads_(num_heads) {};
 
-    void eval_cpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
-    void eval_gpu(const std::vector<mx::array> &inputs, std::vector<mx::array> &outputs) override;
+    void eval_cpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const;
+    void eval_gpu(const std::vector<torch::Tensor> &inputs, std::vector<torch::Tensor> &outputs) const;
 
-    std::pair<std::vector<mx::array>, std::vector<int>> vmap(const std::vector<mx::array> &inputs,
-                                                             const std::vector<int> &axes) override {
-        throw std::runtime_error("FlashAttention has no vmap implementation.");
-    }
+    std::pair<std::vector<torch::Tensor>, std::vector<int64_t>> vmap(const std::vector<torch::Tensor> &inputs,
+                                                                     const std::vector<int64_t> &axes) const;
 
-    const char *name() const override { return "FlashAttention"; }
+    void print(std::ostream &os) const;
+
+    const char *name() const { return "FlashAttention"; }
+
+    bool is_equivalent(const FlashAttention &other) const;
 
 private:
     float scale_;

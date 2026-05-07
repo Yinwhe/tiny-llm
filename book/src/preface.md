@@ -20,17 +20,14 @@ resources are:
 
 ## Environment Setup
 
-This course uses [MLX](https://github.com/ml-explore/mlx), an array/machine learning library for Apple Silicon. Nowadays
-it's much easier to get an Apple Silicon device than NVIDIA GPUs. In theory you can also do this course with PyTorch or
-numpy, but we just don't have the test infra to support them. We test your implementation against PyTorch's CPU implementation
-and MLX's implementation to ensure correctness.
+This course uses PyTorch and CUDA so that you can follow the full implementation and optimization path on NVIDIA GPUs.
 
 ## Course Structure
 
 This course is divided into 3 weeks. We will serve the Qwen2-7B-Instruct model and optimize it throughout the course.
 
 - Week 1: serve Qwen2 with purely matrix manipulation APIs. Just Python.
-- Week 2: optimizations, implement C++/Metal custom kernels to make the model run faster.
+- Week 2: optimizations, implement C++/CUDA custom kernels to make the model run faster.
 - Week 3: more optimizations, batch the requests to serve the model with high throughput.
 
 ## How to Use This Book

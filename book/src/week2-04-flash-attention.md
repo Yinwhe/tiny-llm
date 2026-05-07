@@ -87,10 +87,10 @@ The wrapper should compute `factor` as `1 / sqrt(E)` when `scale` is `None`, fla
 ## Task 2: Implement `flash_attention` (CPU version)
 
 ```
-src/extensions_torch/src/tiny_llm_ext.h
-src/extensions_torch/bindings.cpp
-src/extensions_torch/src/flash_attention.cpp
-src/extensions_torch/CMakeLists.txt
+src/extensions/src/tiny_llm_ext.h
+src/extensions/bindings.cpp
+src/extensions/src/flash_attention.cpp
+src/extensions/CMakeLists.txt
 ```
 
 In this task, add the new Torch extension entry and its CPU implementation. The structure is the same as the quantized matmul chapter: declare the function in `tiny_llm_ext.h`, expose it in `bindings.cpp`, and register `flash_attention.cpp` in `CMakeLists.txt`.
@@ -104,16 +104,16 @@ When `mask == "causal"`, treat it as a block-level optimization opportunity: if 
 You can test your implementation by running:
 
 ```bash
-pdm run build-ext-torch
+pdm run build-ext
 pdm run test --week 2 --day 4 -- -k task_2
 ```
 
 ## Task 3: Implement `flash_attention` (GPU version)
 
 ```
-src/extensions_torch/src/flash_attention.cu
-src/extensions_torch/src/flash_attention.cpp
-src/extensions_torch/CMakeLists.txt
+src/extensions/src/flash_attention.cu
+src/extensions/src/flash_attention.cpp
+src/extensions/CMakeLists.txt
 ```
 
 Now implement the GPU path for the same algorithm.

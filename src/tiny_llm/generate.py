@@ -1,32 +1,34 @@
-import mlx.core as mx
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+from typing import Any, Callable
+
+import torch
+
 from .qwen2_week1 import Qwen2ModelWeek1
-from .qwen2_week2 import Qwen2ModelWeek2
-from typing import Callable
 
 
 def simple_generate(
     model: Qwen2ModelWeek1,
-    tokenizer: TokenizerWrapper,
+    tokenizer: Any,
     prompt: str,
-    sampler: Callable[[mx.array], mx.array] | None,
+    sampler: Callable[[torch.Tensor], torch.Tensor] | None,
 ) -> str:
-    def _step(model, y):
+    def _step(model: Qwen2ModelWeek1, y: torch.Tensor) -> torch.Tensor:
         pass
 
 
 def simple_generate_with_kv_cache(
-    model: Qwen2ModelWeek2, tokenizer: TokenizerWrapper, prompt: str
+    model: Any,
+    tokenizer: Any,
+    prompt: str,
 ) -> str:
-    def _step(model, y, offset, kv_cache):
+    def _step(model: Any, y: torch.Tensor, offset: int, kv_cache: Any):
         pass
 
 
 def speculative_generate(
-    draft_model: Qwen2ModelWeek2,
-    model: Qwen2ModelWeek2,
-    draft_tokenizer: TokenizerWrapper,
-    tokenizer: TokenizerWrapper,
+    draft_model: Any,
+    model: Any,
+    draft_tokenizer: Any,
+    tokenizer: Any,
     prompt: str,
 ) -> str:
     pass

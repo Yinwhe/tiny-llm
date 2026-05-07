@@ -28,6 +28,10 @@ will be applied with the 5th frequency.
 You *only* need to consider `offset` being `None` or a single slice. The `list[slice]` case will be implemented when we
 start implementing the continuous batching feature. Assume all batches provided use the same offset.
 
+In the Torch reference implementation, you may also see a `list[slice]` code path already present. That path is only
+there because the same reference code is reused later for continuous batching. For today's learner task, you still only
+need to implement `None` and a single `slice`.
+
 ```
 x: (N, L, H, D)
 cos/sin_freqs: (MAX_SEQ_LEN, D // 2)
