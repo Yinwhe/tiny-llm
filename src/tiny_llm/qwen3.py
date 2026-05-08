@@ -101,8 +101,8 @@ def assert_dtype(weights: torch.Tensor, dtype: torch.dtype):
 def assert_quantized_weights_dtype(weights: QuantizedWeights, dtype: torch.dtype):
     if weights.scales.dtype != dtype:
         raise ValueError(f"{weights.scales.dtype} != {dtype}")
-    if weights.biases.dtype != dtype:
-        raise ValueError(f"{weights.biases.dtype} != {dtype}")
+    if weights.zeros.dtype != dtype:
+        raise ValueError(f"{weights.zeros.dtype} != {dtype}")
     else:
         return weights
 

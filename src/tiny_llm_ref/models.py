@@ -1,6 +1,5 @@
 from .qwen2_week1 import Qwen2ModelWeek1
 from .qwen2_week2 import Qwen2ModelWeek2
-from .qwen3 import Qwen3Model
 
 
 def shortcut_name_to_full_name(shortcut_name: str, week: int | None = None):
@@ -23,10 +22,6 @@ def shortcut_name_to_full_name(shortcut_name: str, week: int | None = None):
         return "Qwen/Qwen2-0.5B-Instruct"
     elif lower_shortcut_name == "qwen2-1.5b":
         return "Qwen/Qwen2-1.5B-Instruct"
-    elif lower_shortcut_name == "qwen3-0.6b":
-        return "Qwen/Qwen3-0.6B"
-    elif lower_shortcut_name == "qwen3-1.7b":
-        return "Qwen/Qwen3-1.7B"
     else:
         return shortcut_name
 
@@ -37,6 +32,4 @@ def dispatch_model(model_name: str, torch_model, week: int, **kwargs):
         return Qwen2ModelWeek1(torch_model, **kwargs)
     if week == 2 and model_name.startswith("Qwen/Qwen2"):
         return Qwen2ModelWeek2(torch_model, **kwargs)
-    if model_name.startswith("Qwen/Qwen3"):
-        return Qwen3Model(torch_model, **kwargs)
     raise ValueError(f"{model_name} for week {week} not supported")
