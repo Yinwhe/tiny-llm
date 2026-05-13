@@ -63,7 +63,7 @@ This checks PyTorch on CPU and CUDA, and prints the detected CUDA device.
 
 ## Run Unit Tests
 
-Use the same `pdm` workflow as the original book:
+Use the standard `pdm` workflow throughout this repository:
 
 ```bash
 pdm run test --week 1 --day 1

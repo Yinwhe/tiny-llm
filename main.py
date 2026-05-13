@@ -29,7 +29,7 @@ parser.add_argument("--enable-thinking", action="store_true")
 
 args = parser.parse_args()
 
-if args.solution in {"tiny_llm", "user"}:
+if args.solution == "tiny_llm":
     from tiny_llm import (
         load_tokenizer,
         models,
@@ -37,7 +37,7 @@ if args.solution in {"tiny_llm", "user"}:
         simple_generate,
         simple_generate_with_kv_cache,
     )
-elif args.solution in {"tiny_llm_ref", "torch_ref", "ref"}:
+elif args.solution in {"tiny_llm_ref", "ref"}:
     from tiny_llm_ref import (
         load_tokenizer,
         models,

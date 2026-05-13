@@ -51,10 +51,10 @@ parser.add_argument("--enable-flash-attn", action="store_true")
 parser.add_argument("--enable-thinking", action="store_true")
 args = parser.parse_args()
 
-if args.solution in {"tiny_llm", "user"}:
+if args.solution == "tiny_llm":
     print("Using your tiny_llm solution")
     from tiny_llm import batch_generate, load_tokenizer, models
-elif args.solution in {"tiny_llm_ref", "torch_ref", "ref"}:
+elif args.solution in {"tiny_llm_ref", "ref"}:
     print("Using tiny_llm_ref solution")
     from tiny_llm_ref import batch_generate, load_tokenizer, models
 else:

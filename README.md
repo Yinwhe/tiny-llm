@@ -1,5 +1,3 @@
-# tiny-llm - CUDA Branch
+# tiny-llm
 
-This is a CUDA-based fork of [skyzh/tiny-llm](https://github.com/skyzh/tiny-llm) for learning LLM serving on NVIDIA GPUs.
-
-**Note**: This is a personal learning project for CUDA-based LLM serving implementation.
+Torch/CUDA tutorial implementation for learning LLM serving on NVIDIA GPUs, based on [skyzh/tiny-llm](https://github.com/skyzh/tiny-llm).
